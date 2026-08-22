@@ -1,0 +1,477 @@
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Navbar } from '../components/Navbar';
+import { CreateRoomModal } from '../components/CreateRoomModal';
+import { useAuth } from '../context/AuthContext';
+import {
+  Palette,
+  Users,
+  Compass,
+  Plus,
+  ArrowRight,
+  Lock,
+  Globe,
+  Search,
+  Sparkles,
+  Zap,
+  Clock,
+  Layers,
+  Crown,
+  Eye,
+  Edit3,
+} from 'lucide-react';
+
+export const LobbyPage = () => {
+  const { user, token, isAuthenticated, guestLogin } = useAuth();
+  const navigate = useNavigate();
+
+  const [activeTab, setActiveTab] = useState('public'); // 'public' | 'my-rooms'
+  const [publicRooms, setPublicRooms] = useState([]);
+  const [myRooms, setMyRooms] = useState({ ownedRooms: [], joinedRooms: [] });
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [joinRoomCode, setJoinRoomCode] = useState('');
+  const [joinPassword, setJoinPassword] = useState('');
+  const [showJoinPasswordModal, setShowJoinPasswordModal] = useState(null); // room object
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [guestLoading, setGuestLoading] = useState(false);
+
+  // Fetch public rooms
+  const fetchPublicRooms = async () => {
+    try {
+      setLoading(true);
+      const res = await fetch('/api/rooms/public');
+      const data = await res.json();
+      if (data.success) {
+        setPublicRooms(data.rooms || []);
+      }
+    } catch (err) {
+      console.error('Error loading public rooms:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Fetch user rooms
+  const fetchMyRooms = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch('/api/rooms/my-rooms', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.success) {
+        setMyRooms({
+          ownedRooms: data.ownedRooms || [],
+          joinedRooms: data.joinedRooms || [],
+        });
+      }
+    } catch (err) {
+      console.error('Error loading my rooms:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchPublicRooms();
+    if (isAuthenticated) {
+      fetchMyRooms();
+    }
+  }, [isAuthenticated, token]);
+
+  const handleQuickGuest = async () => {
+    try {
+      setGuestLoading(true);
+      await guestLogin('Guest Artist');
+      setShowCreateModal(true);
+    } catch (err) {
+      alert('Failed to initialize guest session');
+    } finally {
+      setGuestLoading(false);
+    }
+  };
+
+  const handleJoinByCode = (e) => {
+    e.preventDefault();
+    if (!joinRoomCode.trim()) return;
+    const cleanCode = joinRoomCode.trim().replace(/^room-/, '');
+    navigate(`/canvas/room-${cleanCode}`);
+  };
+
+  const handleEnterRoom = (room) => {
+    if (room.isPrivate) {
+      setShowJoinPasswordModal(room);
+    } else {
+      navigate(`/canvas/${room.roomId}`);
+    }
+  };
+
+  const handlePrivateRoomSubmit = async (e) => {
+    e.preventDefault();
+    if (!showJoinPasswordModal) return;
+
+    try {
+      const res = await fetch(`/api/rooms/${showJoinPasswordModal.roomId}/join`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ password: joinPassword }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        navigate(`/canvas/${showJoinPasswordModal.roomId}`);
+      } else {
+        alert(data.message || 'Incorrect room password');
+      }
+    } catch (err) {
+      alert('Failed to verify room password');
+    }
+  };
+
+  const filteredPublicRooms = publicRooms.filter((r) =>
+    r.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    r.roomId.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  return (
+    <div style={{ minHeight: '100vh', background: 'var(--bg-primary)', display: 'flex', flexDirection: 'column' }}>
+      <Navbar onCreateRoomClick={() => setShowCreateModal(true)} />
+
+      <main style={{ maxWidth: '1280px', margin: '0 auto', padding: '36px 24px 80px', width: '100%', flex: 1 }}>
+        {/* Hero Section */}
+        <section
+          style={{
+            position: 'relative',
+            padding: '48px 36px',
+            borderRadius: 'var(--radius-lg)',
+            background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.12) 0%, rgba(236, 72, 153, 0.08) 50%, rgba(6, 182, 212, 0.08) 100%)',
+            border: '1px solid var(--border-color)',
+            marginBottom: '40px',
+            overflow: 'hidden',
+          }}
+        >
+          <div style={{ maxWidth: '680px', position: 'relative', zIndex: 2 }}>
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '4px 12px',
+                borderRadius: 'var(--radius-full)',
+                background: 'rgba(99, 102, 241, 0.2)',
+                border: '1px solid rgba(99, 102, 241, 0.4)',
+                color: '#a5b4fc',
+                fontSize: '12px',
+                fontWeight: 600,
+                marginBottom: '16px',
+              }}
+            >
+              <Zap size={13} />
+              <span>Real-Time WebSocket Canvas Engine</span>
+            </div>
+
+            <h1 style={{ fontSize: '38px', fontWeight: 800, lineHeight: 1.2, marginBottom: '14px' }}>
+              Create, Draw & Collaborate in <span className="gradient-text">Real Time</span>
+            </h1>
+
+            <p style={{ fontSize: '16px', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '28px' }}>
+              Seamless multi-user whiteboard with instantaneous stroke streaming, live cursors, version history checkpoints, permission control, and live room chat.
+            </p>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '14px' }}>
+              {isAuthenticated ? (
+                <button onClick={() => setShowCreateModal(true)} className="btn btn-primary" style={{ padding: '12px 24px', fontSize: '15px' }}>
+                  <Plus size={18} />
+                  <span>Create New Canvas</span>
+                </button>
+              ) : (
+                <>
+                  <button onClick={handleQuickGuest} disabled={guestLoading} className="btn btn-primary" style={{ padding: '12px 24px', fontSize: '15px' }}>
+                    <Sparkles size={18} />
+                    <span>{guestLoading ? 'Connecting...' : 'Quick Guest Canvas'}</span>
+                  </button>
+                  <button onClick={() => navigate('/register')} className="btn btn-secondary" style={{ padding: '12px 20px', fontSize: '15px' }}>
+                    Sign Up Free
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </section>
+
+        {/* Join by Code bar & Search */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '32px' }}>
+          {/* Quick Join Card */}
+          <form onSubmit={handleJoinByCode} className="glass-card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                JOIN VIA ROOM ID / CODE
+              </div>
+              <input
+                type="text"
+                className="input-field"
+                placeholder="Enter Room Code (e.g. room-abc123)..."
+                value={joinRoomCode}
+                onChange={(e) => setJoinRoomCode(e.target.value)}
+                style={{ padding: '8px 12px' }}
+              />
+            </div>
+            <button type="submit" className="btn btn-primary" style={{ marginTop: '18px', padding: '9px 16px' }}>
+              <span>Join</span>
+              <ArrowRight size={15} />
+            </button>
+          </form>
+
+          {/* Search Filter */}
+          <div className="glass-card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                SEARCH PUBLIC ROOMS
+              </div>
+              <div style={{ position: 'relative' }}>
+                <Search size={16} color="var(--text-muted)" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
+                <input
+                  type="text"
+                  className="input-field"
+                  placeholder="Search by title or room ID..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{ padding: '8px 12px 8px 36px' }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Rooms Tabs */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color)', marginBottom: '24px' }}>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              onClick={() => setActiveTab('public')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '10px 16px',
+                border: 'none',
+                background: 'transparent',
+                color: activeTab === 'public' ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                borderBottom: activeTab === 'public' ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                fontWeight: 600,
+                fontSize: '14px',
+                cursor: 'pointer',
+              }}
+            >
+              <Globe size={16} />
+              <span>Public Rooms ({filteredPublicRooms.length})</span>
+            </button>
+
+            {isAuthenticated && (
+              <button
+                onClick={() => setActiveTab('my-rooms')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '10px 16px',
+                  border: 'none',
+                  background: 'transparent',
+                  color: activeTab === 'my-rooms' ? 'var(--accent-primary)' : 'var(--text-secondary)',
+                  borderBottom: activeTab === 'my-rooms' ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                  fontWeight: 600,
+                  fontSize: '14px',
+                  cursor: 'pointer',
+                }}
+              >
+                <Crown size={16} />
+                <span>My Canvases ({myRooms.ownedRooms.length + myRooms.joinedRooms.length})</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Rooms Grid */}
+        {activeTab === 'public' ? (
+          loading ? (
+            <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text-muted)' }}>Loading active rooms...</div>
+          ) : filteredPublicRooms.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '60px 20px', border: '1px dashed var(--border-color)', borderRadius: 'var(--radius-lg)' }}>
+              <Palette size={40} color="var(--text-muted)" style={{ margin: '0 auto 12px' }} />
+              <h3 style={{ fontSize: '18px', marginBottom: '6px' }}>No rooms found</h3>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '14px', marginBottom: '20px' }}>
+                Be the first to start a collaborative canvas session!
+              </p>
+              <button onClick={() => setShowCreateModal(true)} className="btn btn-primary">
+                <Plus size={16} />
+                <span>Create a Canvas Room</span>
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '20px' }}>
+              {filteredPublicRooms.map((room) => (
+                <div key={room.roomId} className="glass-card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                  <div>
+                    {/* Top row */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                      <span className="badge badge-primary" style={{ fontSize: '11px' }}>
+                        {room.roomId}
+                      </span>
+
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: 'var(--accent-emerald)', fontWeight: 600 }}>
+                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--accent-emerald)' }} />
+                        {room.memberCount || 1} online
+                      </span>
+                    </div>
+
+                    <h3 style={{ fontSize: '17px', fontWeight: 700, marginBottom: '6px' }}>
+                      {room.title}
+                    </h3>
+
+                    {room.description && (
+                      <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '14px', lineHeight: 1.4 }}>
+                        {room.description}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Footer info & Enter button */}
+                  <div style={{ marginTop: '18px', paddingTop: '14px', borderTop: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div
+                        style={{
+                          width: '26px',
+                          height: '26px',
+                          borderRadius: '50%',
+                          background: room.owner?.avatarColor || '#6366f1',
+                          color: '#fff',
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        {room.owner?.username ? room.owner.username.charAt(0).toUpperCase() : 'O'}
+                      </div>
+                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                        {room.owner?.username || 'Anonymous'}
+                      </span>
+                    </div>
+
+                    <button onClick={() => handleEnterRoom(room)} className="btn btn-primary" style={{ padding: '6px 14px', fontSize: '13px' }}>
+                      <span>Enter</span>
+                      <ArrowRight size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        ) : (
+          /* My Rooms View */
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '30px' }}>
+            {/* Owned Rooms */}
+            <div>
+              <h3 style={{ fontSize: '16px', fontWeight: 700, marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Crown size={16} color="#fbbf24" /> Created by You ({myRooms.ownedRooms.length})
+              </h3>
+              {myRooms.ownedRooms.length === 0 ? (
+                <div style={{ color: 'var(--text-muted)', fontSize: '13px' }}>You haven't created any rooms yet.</div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '16px' }}>
+                  {myRooms.ownedRooms.map((r) => (
+                    <div key={r.roomId} className="glass-card" style={{ padding: '18px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                          <span className="badge badge-owner">Owner</span>
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{r.roomId}</span>
+                        </div>
+                        <h4 style={{ fontSize: '16px', fontWeight: 700 }}>{r.title}</h4>
+                      </div>
+                      <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end' }}>
+                        <button onClick={() => navigate(`/canvas/${r.roomId}`)} className="btn btn-primary" style={{ padding: '6px 14px', fontSize: '13px' }}>
+                          Open Canvas
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Joined Rooms */}
+            <div>
+              <h3 style={{ fontSize: '16px', fontWeight: 700, marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Users size={16} color="var(--accent-primary)" /> Joined Canvases ({myRooms.joinedRooms.length})
+              </h3>
+              {myRooms.joinedRooms.length === 0 ? (
+                <div style={{ color: 'var(--text-muted)', fontSize: '13px' }}>No joined canvases yet.</div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '16px' }}>
+                  {myRooms.joinedRooms.map((r) => (
+                    <div key={r.roomId} className="glass-card" style={{ padding: '18px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                          <span className="badge badge-editor">Member</span>
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{r.roomId}</span>
+                        </div>
+                        <h4 style={{ fontSize: '16px', fontWeight: 700 }}>{r.title}</h4>
+                      </div>
+                      <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end' }}>
+                        <button onClick={() => navigate(`/canvas/${r.roomId}`)} className="btn btn-primary" style={{ padding: '6px 14px', fontSize: '13px' }}>
+                          Open Canvas
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* Create Room Modal */}
+      <CreateRoomModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onRoomCreated={() => {
+          fetchPublicRooms();
+          fetchMyRooms();
+        }}
+      />
+
+      {/* Private Room Password Prompt Modal */}
+      {showJoinPasswordModal && (
+        <div className="modal-overlay" onClick={() => setShowJoinPasswordModal(null)}>
+          <div className="modal-content" style={{ maxWidth: '400px' }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ fontSize: '18px', marginBottom: '8px' }}>Private Canvas</h3>
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
+              Please enter the password for "{showJoinPasswordModal.title}".
+            </p>
+            <form onSubmit={handlePrivateRoomSubmit}>
+              <input
+                type="password"
+                className="input-field"
+                placeholder="Enter password..."
+                value={joinPassword}
+                onChange={(e) => setJoinPassword(e.target.value)}
+                required
+                style={{ marginBottom: '16px' }}
+              />
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                <button type="button" onClick={() => setShowJoinPasswordModal(null)} className="btn btn-secondary">
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary">
+                  Enter Room
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

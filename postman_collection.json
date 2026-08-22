@@ -1,0 +1,246 @@
+{
+  "info": {
+    "_postman_id": "8a329d91-3b7c-48be-8f3e-canvas-mern-api",
+    "name": "Real-Time Collaborative Canvas Drawing API",
+    "description": "Complete REST API collection for Real-Time Collaborative Canvas Drawing Application (MERN Stack)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "1. Register User",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"alice_artist\",\n  \"email\": \"alice@example.com\",\n  \"password\": \"password123\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/auth/register", "host": ["{{baseUrl}}"], "path": ["api", "auth", "register"] }
+          }
+        },
+        {
+          "name": "2. Login User",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alice@example.com\",\n  \"password\": \"password123\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "auth", "login"] }
+          }
+        },
+        {
+          "name": "3. Guest Instant Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nickname\": \"Guest Explorer\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/auth/guest", "host": ["{{baseUrl}}"], "path": ["api", "auth", "guest"] }
+          }
+        },
+        {
+          "name": "4. Get Current User Profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{authToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/auth/me", "host": ["{{baseUrl}}"], "path": ["api", "auth", "me"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Rooms",
+      "item": [
+        {
+          "name": "1. Create Room",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{authToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Architecture Concept Brainstorming\",\n  \"description\": \"Live whiteboard for product design and flowcharts\",\n  \"isPrivate\": false,\n  \"defaultRole\": \"editor\",\n  \"maxUsers\": 25\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/rooms", "host": ["{{baseUrl}}"], "path": ["api", "rooms"] }
+          }
+        },
+        {
+          "name": "2. Get Public Rooms",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/rooms/public", "host": ["{{baseUrl}}"], "path": ["api", "rooms", "public"] }
+          }
+        },
+        {
+          "name": "3. Get My Rooms",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{authToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/rooms/my-rooms", "host": ["{{baseUrl}}"], "path": ["api", "rooms", "my-rooms"] }
+          }
+        },
+        {
+          "name": "4. Get Room Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{authToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/rooms/{{roomId}}", "host": ["{{baseUrl}}"], "path": ["api", "rooms", "{{roomId}}"] }
+          }
+        },
+        {
+          "name": "5. Join Room (with password check)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{authToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"password\": \"roomSecret123\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/rooms/{{roomId}}/join", "host": ["{{baseUrl}}"], "path": ["api", "rooms", "{{roomId}}", "join"] }
+          }
+        },
+        {
+          "name": "6. Update Room Settings (Owner only)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{authToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Updated Architecture Workshop\",\n  \"defaultRole\": \"viewer\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/rooms/{{roomId}}", "host": ["{{baseUrl}}"], "path": ["api", "rooms", "{{roomId}}"] }
+          }
+        },
+        {
+          "name": "7. Get Room Members",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/rooms/{{roomId}}/members", "host": ["{{baseUrl}}"], "path": ["api", "rooms", "{{roomId}}", "members"] }
+          }
+        },
+        {
+          "name": "8. Update Member Role (Owner Control)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{authToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"viewer\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/rooms/{{roomId}}/members/{{memberUserId}}", "host": ["{{baseUrl}}"], "path": ["api", "rooms", "{{roomId}}", "members", "{{memberUserId}}"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Canvas & Snapshots",
+      "item": [
+        {
+          "name": "1. Get Canvas State",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/canvas/{{roomId}}/state", "host": ["{{baseUrl}}"], "path": ["api", "canvas", "{{roomId}}", "state"] }
+          }
+        },
+        {
+          "name": "2. Save Manual Canvas State",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{authToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"backgroundColor\": \"#12131c\",\n  \"elements\": [\n    {\n      \"id\": \"el-101\",\n      \"type\": \"rectangle\",\n      \"x\": 100,\n      \"y\": 150,\n      \"width\": 200,\n      \"height\": 120,\n      \"strokeColor\": \"#6366f1\",\n      \"fillColor\": \"transparent\",\n      \"strokeWidth\": 3\n    }\n  ]\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/canvas/{{roomId}}/state", "host": ["{{baseUrl}}"], "path": ["api", "canvas", "{{roomId}}", "state"] }
+          }
+        },
+        {
+          "name": "3. Create Version Snapshot",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{authToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Sprint 1 Sprint Review Diagram\",\n  \"thumbnail\": \"data:image/jpeg;base64,...\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/canvas/{{roomId}}/snapshots", "host": ["{{baseUrl}}"], "path": ["api", "canvas", "{{roomId}}", "snapshots"] }
+          }
+        },
+        {
+          "name": "4. List Snapshots",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/canvas/{{roomId}}/snapshots", "host": ["{{baseUrl}}"], "path": ["api", "canvas", "{{roomId}}", "snapshots"] }
+          }
+        },
+        {
+          "name": "5. Restore Snapshot Version",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{authToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/canvas/{{roomId}}/snapshots/{{snapshotId}}/restore", "host": ["{{baseUrl}}"], "path": ["api", "canvas", "{{roomId}}", "snapshots", "{{snapshotId}}", "restore"] }
+          }
+        },
+        {
+          "name": "6. Export Canvas JSON",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/canvas/{{roomId}}/export", "host": ["{{baseUrl}}"], "path": ["api", "canvas", "{{roomId}}", "export"] }
+          }
+        },
+        {
+          "name": "7. Get Room Chat History",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/canvas/{{roomId}}/chat?limit=50", "host": ["{{baseUrl}}"], "path": ["api", "canvas", "{{roomId}}", "chat"] }
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5000" },
+    { "key": "authToken", "value": "" },
+    { "key": "roomId", "value": "room-demo" },
+    { "key": "memberUserId", "value": "" },
+    { "key": "snapshotId", "value": "" }
+  ]
+}
