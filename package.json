@@ -7,7 +7,10 @@
     "dev:backend": "cd backend && npm run dev",
     "dev:frontend": "cd frontend && npm run dev",
     "install:all": "cd backend && npm install && cd ../frontend && npm install",
-    "build": "cd frontend && npm run build"
+    "build": "cd frontend && npm run build",
+    "test:api": "cd backend && npm run test:api",
+    "test:socket": "cd backend && npm run test:socket",
+    "test:load": "cd backend && npm run test:load"
   },
   "keywords": [
     "mern",
