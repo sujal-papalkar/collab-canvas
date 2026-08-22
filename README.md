@@ -300,7 +300,7 @@ Fetch current authenticated user profile (`Authorization: Bearer <token>`).
 
 1. **Clone or open repository**:
 ```bash
-cd "New folder"
+cd collab-canvas
 ```
 
 2. **Start Backend Server**:
