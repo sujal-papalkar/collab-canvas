@@ -54,10 +54,10 @@ export const SocketProvider = ({ children }) => {
   }, [token, user?.username]);
 
   // Join a canvas room
-  const joinRoom = (roomId) => {
+  const joinRoom = (roomId, password = null) => {
     if (!socketRef.current || !roomId) return;
 
-    socketRef.current.emit('join-room', { roomId });
+    socketRef.current.emit('join-room', { roomId, password });
 
     // Reset local room states
     setRemoteCursors({});

@@ -22,11 +22,12 @@ import {
   isPointInElement,
   getElementBounds,
 } from '../utils/canvasRenderer';
+import { Lock, ShieldAlert, ArrowLeft } from 'lucide-react';
 
 export const CanvasPage = () => {
   const { roomId } = useParams();
   const navigate = useNavigate();
-  const { user, token, isAuthenticated, guestLogin } = useAuth();
+  const { user, token, isAuthenticated, loading } = useAuth();
   const {
     socket,
     isConnected,
@@ -56,12 +57,25 @@ export const CanvasPage = () => {
   } = useSocket();
 
   const [room, setRoom] = useState(null);
+  const [roomLoading, setRoomLoading] = useState(true);
+  const [roomError, setRoomError] = useState('');
+  const [isLocked, setIsLocked] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordLoading, setPasswordLoading] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isUsersOpen, setIsUsersOpen] = useState(false);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [showSnapshots, setShowSnapshots] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [cursorThrottleTimeout, setCursorThrottleTimeout] = useState(null);
+
+  // Redirect to signup/login if visitor is not authenticated
+  useEffect(() => {
+    if (!loading && !isAuthenticated) {
+      navigate(`/register?redirect=${encodeURIComponent(`/canvas/${roomId}`)}`, { replace: true });
+    }
+  }, [loading, isAuthenticated, roomId, navigate]);
 
   // Hook for canvas state and tool management
   const {
@@ -127,39 +141,80 @@ export const CanvasPage = () => {
 
   // 1. Fetch room details from API
   useEffect(() => {
+    if (!isAuthenticated) return;
     const fetchRoom = async () => {
       try {
+        setRoomLoading(true);
+        setRoomError('');
         const res = await fetch(`/api/rooms/${roomId}`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
         });
         const data = await res.json();
-        if (data.success && data.room) {
-          setRoom(data.room);
-          if (data.room.userRole) {
-            setCurrentRole(data.room.userRole);
-          }
+        if (!res.ok || !data.success || !data.room) {
+          setRoomError(data.message || 'Room not found or has expired.');
+          setRoomLoading(false);
+          return;
+        }
+
+        setRoom(data.room);
+        if (data.room.userRole) {
+          setCurrentRole(data.room.userRole);
+        }
+
+        // Check if room is private and user is not owner and not already a member
+        if (data.room.isPrivate && !data.room.isMember && data.room.userRole !== 'owner') {
+          setIsLocked(true);
+        } else {
+          setIsLocked(false);
         }
       } catch (err) {
         console.error('Error fetching room info:', err);
+        setRoomError('Unable to connect to room server.');
+      } finally {
+        setRoomLoading(false);
       }
     };
 
     fetchRoom();
-  }, [roomId, token]);
+  }, [roomId, token, isAuthenticated]);
 
-  // 2. Auto guest session if not authenticated
-  useEffect(() => {
-    const ensureSession = async () => {
-      if (!isAuthenticated && !user) {
-        await guestLogin('Collab Guest');
+  const handleUnlockPrivateRoom = async (e) => {
+    e.preventDefault();
+    if (!passwordInput.trim()) {
+      setPasswordError('Please enter the password.');
+      return;
+    }
+
+    try {
+      setPasswordLoading(true);
+      setPasswordError('');
+
+      const res = await fetch(`/api/rooms/${roomId}/join`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ password: passwordInput.trim() }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setRoom((prev) => ({ ...prev, isMember: true, userRole: data.role }));
+        if (data.role) setCurrentRole(data.role);
+        setIsLocked(false);
+      } else {
+        setPasswordError(data.message || 'Incorrect room password. Please try again.');
       }
-    };
-    ensureSession();
-  }, [isAuthenticated, user]);
+    } catch (err) {
+      setPasswordError('Failed to verify room password.');
+    } finally {
+      setPasswordLoading(false);
+    }
+  };
 
-  // 3. Socket Room Join & Real-Time Event Handlers
+  // 2. Socket Room Join & Real-Time Event Handlers
   useEffect(() => {
-    if (!socket || !roomId) return;
+    if (!socket || !roomId || !isAuthenticated || isLocked || roomLoading || roomError) return;
 
     joinRoom(roomId);
 
@@ -169,6 +224,14 @@ export const CanvasPage = () => {
       if (data.backgroundColor) setBackgroundColor(data.backgroundColor);
       if (data.activeUsers) setActiveUsers(data.activeUsers);
       if (data.role) setCurrentRole(data.role);
+    });
+
+    socket.on('room-auth-required', () => {
+      setIsLocked(true);
+    });
+
+    socket.on('room-error', (data) => {
+      setRoomError(data.message || 'Room error occurred.');
     });
 
     // Remote user joined
@@ -304,9 +367,17 @@ export const CanvasPage = () => {
       }));
     });
 
+    // Room closed event (e.g. host exited guest room)
+    socket.on('room-closed', ({ message }) => {
+      alert(message || 'This room has been closed.');
+      navigate('/');
+    });
+
     // Cleanup listeners on room change
     return () => {
       socket.off('init-room-state');
+      socket.off('room-auth-required');
+      socket.off('room-error');
       socket.off('user-joined');
       socket.off('user-left');
       socket.off('remote-cursor-move');
@@ -320,14 +391,27 @@ export const CanvasPage = () => {
       socket.off('role-changed');
       socket.off('chat-message');
       socket.off('user-typing');
+      socket.off('room-closed');
       leaveRoom();
     };
-  }, [socket, roomId]);
+  }, [socket, roomId, isAuthenticated, isLocked, roomLoading, roomError, navigate]);
 
   // Reset unread count when chat opened
   useEffect(() => {
     if (isChatOpen) setUnreadChatCount(0);
   }, [isChatOpen]);
+
+  // Handle browser tab close or refresh
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      leaveRoom();
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, []);
 
   // 4. Main HTML5 Canvas Render Loop
   useEffect(() => {
@@ -797,6 +881,109 @@ export const CanvasPage = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleUndo, handleRedo, handleDeleteSelected, setActiveTool]);
 
+  // Import PNG/JPEG image onto canvas (strict rejection of SVG & JSON)
+  const handleImportImage = (dataUrl) => {
+    if (currentRole === 'viewer') return;
+    const img = new Image();
+    img.onload = () => {
+      let w = img.naturalWidth || 300;
+      let h = img.naturalHeight || 300;
+      const maxDim = 450;
+      if (w > maxDim || h > maxDim) {
+        if (w > h) {
+          h = Math.round((h / w) * maxDim);
+          w = maxDim;
+        } else {
+          w = Math.round((w / h) * maxDim);
+          h = maxDim;
+        }
+      }
+
+      // Center in current screen view
+      const worldCenter = screenToWorld(window.innerWidth / 2, window.innerHeight / 2);
+      const newImageElement = {
+        id: `img-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        type: 'image',
+        x: Math.round(worldCenter.x - w / 2),
+        y: Math.round(worldCenter.y - h / 2),
+        width: w,
+        height: h,
+        src: dataUrl,
+        opacity: 1,
+      };
+
+      pushUndoState();
+      setElements((prev) => [...prev, newImageElement]);
+      broadcastElementCreated(newImageElement);
+      setSelectedIds([newImageElement.id]);
+    };
+    img.src = dataUrl;
+  };
+
+  // Clipboard paste support for PNG / JPEG images
+  useEffect(() => {
+    const handlePaste = (e) => {
+      if (currentRole === 'viewer') return;
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.indexOf('image') !== -1) {
+          if (item.type === 'image/svg+xml') {
+            alert('SVG format is not supported. Only PNG and JPEG images are allowed.');
+            return;
+          }
+          if (item.type === 'image/png' || item.type === 'image/jpeg' || item.type === 'image/jpg') {
+            const blob = item.getAsFile();
+            const reader = new FileReader();
+            reader.onload = (event) => {
+              handleImportImage(event.target.result);
+            };
+            reader.readAsDataURL(blob);
+          }
+        }
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [currentRole, screenToWorld, pushUndoState, broadcastElementCreated]);
+
+  // Drag and drop support for PNG / JPEG images
+  const handleDragOver = (e) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    if (currentRole === 'viewer') return;
+
+    const files = e.dataTransfer?.files;
+    if (!files || files.length === 0) return;
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const validTypes = ['image/png', 'image/jpeg', 'image/jpg'];
+      const fileName = file.name.toLowerCase();
+
+      if (fileName.endsWith('.svg') || fileName.endsWith('.json') || file.type === 'image/svg+xml' || file.type === 'application/json') {
+        alert('SVG and JSON files are not supported. Only PNG and JPEG images can be imported.');
+        continue;
+      }
+
+      if (validTypes.includes(file.type) || fileName.endsWith('.png') || fileName.endsWith('.jpg') || fileName.endsWith('.jpeg')) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          handleImportImage(event.target.result);
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+  };
+
   // Double click element to edit text
   const handleDoubleClick = (e) => {
     const worldPoint = screenToWorld(e.clientX, e.clientY);
@@ -806,8 +993,28 @@ export const CanvasPage = () => {
     }
   };
 
+  if (loading || !isAuthenticated) {
+    return (
+      <div
+        style={{
+          minHeight: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'var(--bg-primary)',
+          color: 'var(--text-secondary)',
+          gap: '16px',
+        }}
+      >
+        <div className="canvas-spinner" />
+        <span style={{ fontSize: '14px', fontWeight: 600 }}>Loading canvas workspace...</span>
+      </div>
+    );
+  }
+
   return (
-    <div className="canvas-viewport" onWheel={handleWheel}>
+    <div className="canvas-viewport" onWheel={handleWheel} onDragOver={handleDragOver} onDrop={handleDrop}>
       {/* Floating Canvas Top Header */}
       <CanvasHeader
         room={room}
@@ -815,6 +1022,7 @@ export const CanvasPage = () => {
         activeUsers={activeUsers}
         onOpenSnapshots={() => setShowSnapshots(true)}
         onOpenExport={() => setShowExport(true)}
+        onImportImage={handleImportImage}
         isChatOpen={isChatOpen}
         setIsChatOpen={setIsChatOpen}
         isUsersOpen={isUsersOpen}
@@ -990,6 +1198,106 @@ export const CanvasPage = () => {
         roomTitle={room?.title || 'canvas'}
         roomId={roomId}
       />
+
+      {/* Loading Canvas Workspace Overlay */}
+      {roomLoading && (
+        <div style={{ position: 'fixed', inset: 0, background: 'var(--bg-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 120 }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ width: '40px', height: '40px', border: '3px solid rgba(99, 102, 241, 0.2)', borderTopColor: 'var(--accent-primary)', borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto 16px' }} />
+            <p style={{ color: 'var(--text-secondary)', fontSize: '14px', fontWeight: 500 }}>Connecting to canvas workspace...</p>
+          </div>
+        </div>
+      )}
+
+      {/* Room Not Found / Error Screen */}
+      {roomError && !roomLoading && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(10, 11, 16, 0.95)', backdropFilter: 'blur(16px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 120, padding: '24px' }}>
+          <div className="glass-card" style={{ maxWidth: '440px', width: '100%', padding: '36px 28px', textAlign: 'center' }}>
+            <div style={{ width: '56px', height: '56px', borderRadius: '16px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+              <ShieldAlert size={28} color="#f87171" />
+            </div>
+            <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '8px' }}>Room Not Found</h2>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '14px', marginBottom: '24px', lineHeight: 1.5 }}>
+              {roomError}
+            </p>
+            <button onClick={() => navigate('/')} className="btn btn-primary" style={{ width: '100%', padding: '10px 16px' }}>
+              <ArrowLeft size={16} />
+              <span>Back to Canvas Lobby</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Private Room Password Unlock Modal */}
+      {isLocked && !roomLoading && !roomError && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(10, 11, 16, 0.92)', backdropFilter: 'blur(16px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 120, padding: '20px' }}>
+          <div className="glass-card" style={{ maxWidth: '440px', width: '100%', padding: '32px', border: '1px solid rgba(236, 72, 153, 0.35)', boxShadow: '0 25px 60px -15px rgba(0,0,0,0.7)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '18px' }}>
+              <div style={{ width: '48px', height: '48px', borderRadius: '14px', background: 'rgba(236, 72, 153, 0.15)', border: '1px solid rgba(236, 72, 153, 0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Lock size={24} color="var(--accent-secondary)" />
+              </div>
+              <div>
+                <h2 style={{ fontSize: '19px', fontWeight: 700, margin: 0 }}>Password Protected Canvas</h2>
+                <span className="badge badge-primary" style={{ fontSize: '11px', marginTop: '4px' }}>
+                  {roomId}
+                </span>
+              </div>
+            </div>
+
+            <p style={{ color: 'var(--text-secondary)', fontSize: '14px', lineHeight: 1.5, marginBottom: '20px' }}>
+              This whiteboard <strong style={{ color: '#fff' }}>"{room?.title || roomId}"</strong> is private. Please enter the room password to unlock the workspace.
+            </p>
+
+            {passwordError && (
+              <div style={{ padding: '10px 14px', borderRadius: '8px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#f87171', fontSize: '13px', marginBottom: '16px' }}>
+                {passwordError}
+              </div>
+            )}
+
+            <form onSubmit={handleUnlockPrivateRoom} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
+                  ROOM PASSWORD
+                </label>
+                <input
+                  type="password"
+                  autoFocus
+                  className="input-field"
+                  placeholder="Enter room password..."
+                  value={passwordInput}
+                  onChange={(e) => {
+                    setPasswordInput(e.target.value);
+                    if (passwordError) setPasswordError('');
+                  }}
+                  required
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
+                <button
+                  type="button"
+                  onClick={() => navigate('/')}
+                  className="btn btn-secondary"
+                  style={{ flex: 1 }}
+                  disabled={passwordLoading}
+                >
+                  <ArrowLeft size={15} />
+                  <span>Lobby</span>
+                </button>
+                <button
+                  type="submit"
+                  disabled={passwordLoading || !passwordInput.trim()}
+                  className="btn btn-primary"
+                  style={{ flex: 2, opacity: passwordLoading ? 0.7 : 1 }}
+                >
+                  <Lock size={15} />
+                  <span>{passwordLoading ? 'Verifying...' : 'Unlock Canvas'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

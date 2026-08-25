@@ -11,8 +11,21 @@ export const createRoom = async (req, res) => {
     const { title, description, isPrivate, password, defaultRole, maxUsers } = req.body;
     const userId = req.user.id;
 
-    if (!title || !title.trim()) {
+    const trimmedTitle = title?.trim();
+    if (!trimmedTitle) {
       return res.status(400).json({ success: false, message: 'Room title is required.' });
+    }
+
+    // Enforce unique room titles (case-insensitive)
+    const existingRoom = await Room.findOne({
+      title: { $regex: new RegExp(`^${trimmedTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+    });
+
+    if (existingRoom) {
+      return res.status(409).json({
+        success: false,
+        message: `A room with the title "${trimmedTitle}" already exists. Please choose a unique room name.`,
+      });
     }
 
     // Generate unique short roomId (e.g., room-4a8f9b or slug)
@@ -25,12 +38,16 @@ export const createRoom = async (req, res) => {
       passwordHash = await bcrypt.hash(password, salt);
     }
 
+    const isGuest = !!req.user.isGuest;
+    const finalIsPrivate = isGuest ? (!!isPrivate || !!password) : !!isPrivate;
+
     const newRoom = await Room.create({
       roomId,
       title: title.trim(),
       description: description?.trim() || '',
       owner: userId,
-      isPrivate: !!isPrivate,
+      isPrivate: finalIsPrivate,
+      isGuestRoom: isGuest,
       passwordHash,
       defaultRole: defaultRole === 'viewer' ? 'viewer' : 'editor',
       maxUsers: maxUsers || 20,
@@ -60,6 +77,7 @@ export const createRoom = async (req, res) => {
         title: newRoom.title,
         description: newRoom.description,
         isPrivate: newRoom.isPrivate,
+        isGuestRoom: newRoom.isGuestRoom,
         defaultRole: newRoom.defaultRole,
         owner: userId,
         createdAt: newRoom.createdAt,
@@ -74,14 +92,17 @@ export const createRoom = async (req, res) => {
 // Get list of public rooms
 export const getPublicRooms = async (req, res) => {
   try {
-    const rooms = await Room.find({ isPrivate: false })
-      .populate('owner', 'username avatarColor')
+    const rooms = await Room.find({ isPrivate: false, isGuestRoom: { $ne: true } })
+      .populate('owner', 'username avatarColor isGuest')
       .sort({ updatedAt: -1 })
       .limit(30)
       .lean();
 
+    // Filter out any rooms where owner is a guest user
+    const nonGuestRooms = rooms.filter((r) => !r.owner?.isGuest);
+
     const roomsWithCount = await Promise.all(
-      rooms.map(async (r) => {
+      nonGuestRooms.map(async (r) => {
         const memberCount = await RoomMember.countDocuments({ roomId: r.roomId });
         return {
           roomId: r.roomId,
@@ -173,6 +194,7 @@ export const getRoomDetails = async (req, res) => {
         title: room.title,
         description: room.description,
         isPrivate: room.isPrivate,
+        hasPassword: !!room.passwordHash,
         defaultRole: room.defaultRole,
         maxUsers: room.maxUsers,
         owner: room.owner,
@@ -261,7 +283,21 @@ export const updateRoom = async (req, res) => {
       return res.status(403).json({ success: false, message: 'Only the room owner can modify room settings.' });
     }
 
-    if (title) room.title = title.trim();
+    if (title && title.trim()) {
+      const trimmedTitle = title.trim();
+      const existingRoom = await Room.findOne({
+        roomId: { $ne: roomId },
+        title: { $regex: new RegExp(`^${trimmedTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+      });
+
+      if (existingRoom) {
+        return res.status(409).json({
+          success: false,
+          message: `A room with the title "${trimmedTitle}" already exists. Please choose a unique room name.`,
+        });
+      }
+      room.title = trimmedTitle;
+    }
     if (description !== undefined) room.description = description.trim();
     if (defaultRole) room.defaultRole = defaultRole;
     if (maxUsers) room.maxUsers = maxUsers;

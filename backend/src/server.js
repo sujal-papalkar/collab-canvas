@@ -57,6 +57,9 @@ app.use((err, req, res, next) => {
   });
 });
 
+
+import { cleanUpGuestRooms } from './utils/cleanup.js';
+
 // Initialize Socket.io handlers
 initializeSockets(io);
 
@@ -65,10 +68,31 @@ const PORT = process.env.PORT || 5000;
 
 const startServer = async () => {
   await connectDB();
+
+  // Clean up any guest rooms and accounts from previous sessions / restarts
+  const cleanupRes = await cleanUpGuestRooms();
+  if (cleanupRes.deletedRooms > 0 || cleanupRes.deletedUsers > 0) {
+    console.log(`🧹 [Startup] Cleaned up ${cleanupRes.deletedRooms} guest room(s) and ${cleanupRes.deletedUsers} guest account(s).`);
+  }
+
   server.listen(PORT, () => {
-    console.log(` Server running on http://localhost:${PORT}`);
-    console.log(` WebSocket ready on ws://localhost:${PORT}`);
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
+    console.log(`⚡ WebSocket ready on ws://localhost:${PORT}`);
   });
 };
+
+// Graceful shutdown
+const handleShutdown = async (signal) => {
+  console.log(`\n🛑 [Shutdown] Received ${signal}. Cleaning up guest sessions...`);
+  try {
+    await cleanUpGuestRooms();
+  } catch (e) {
+    console.error('Error during shutdown cleanup:', e);
+  }
+  process.exit(0);
+};
+
+process.on('SIGINT', () => handleShutdown('SIGINT'));
+process.on('SIGTERM', () => handleShutdown('SIGTERM'));
 
 startServer();

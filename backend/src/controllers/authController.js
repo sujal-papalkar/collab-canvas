@@ -1,6 +1,7 @@
 import User from '../models/User.js';
 import { generateToken } from '../middleware/auth.js';
 import { v4 as uuidv4 } from 'uuid';
+import { cleanUpGuestUserRooms } from '../utils/cleanup.js';
 
 // Register standard user
 export const register = async (req, res) => {
@@ -152,5 +153,26 @@ export const getMe = async (req, res) => {
   } catch (err) {
     console.error('Get profile error:', err);
     res.status(500).json({ success: false, message: 'Error retrieving user profile.' });
+  }
+};
+
+// Logout user and clean up guest room resources
+export const logout = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    const isGuest = !!req.user?.isGuest;
+
+    if (isGuest && userId) {
+      const result = await cleanUpGuestUserRooms(userId);
+      console.log(`🧹 [Logout] Cleaned up ${result?.deletedRooms || 0} room(s) for guest ${userId}`);
+    }
+
+    res.json({
+      success: true,
+      message: 'Logged out successfully.',
+    });
+  } catch (err) {
+    console.error('Logout error:', err);
+    res.status(500).json({ success: false, message: 'Logout failed.' });
   }
 };

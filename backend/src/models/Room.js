@@ -44,6 +44,10 @@ const RoomSchema = new mongoose.Schema(
       min: 2,
       max: 100,
     },
+    isGuestRoom: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,

@@ -1,5 +1,17 @@
 // Canvas Rendering Engine and Geometry Utilities
 
+// Image cache for rendering imported PNG/JPEG images without reloading each frame
+const imageCache = new Map();
+
+export const getImageFromCache = (src) => {
+  if (!src) return null;
+  if (imageCache.has(src)) return imageCache.get(src);
+  const img = new Image();
+  img.src = src;
+  imageCache.set(src, img);
+  return img;
+};
+
 // Helper to compute bounding box for any element
 export const getElementBounds = (el) => {
   if (['pencil', 'brush', 'highlighter'].includes(el.type)) {
@@ -346,6 +358,22 @@ export const renderElement = (ctx, el) => {
       lines.forEach((line, idx) => {
         ctx.fillText(line, bounds.minX + 12, bounds.minY + 12 + idx * lineHeight);
       });
+      break;
+    }
+
+    case 'image': {
+      const bounds = getElementBounds(el);
+      if (el.src) {
+        const img = getImageFromCache(el.src);
+        if (img && img.complete && img.naturalWidth > 0) {
+          ctx.drawImage(img, bounds.minX, bounds.minY, bounds.width, bounds.height);
+        } else if (img) {
+          // Placeholder outline while image loads
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(bounds.minX, bounds.minY, bounds.width, bounds.height);
+        }
+      }
       break;
     }
 

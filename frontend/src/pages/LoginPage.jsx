@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Palette, Mail, Lock, LogIn, Sparkles, ArrowRight } from 'lucide-react';
 
 export const LoginPage = () => {
   const { login, guestLogin } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const redirect = searchParams.get('redirect');
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -21,7 +23,7 @@ export const LoginPage = () => {
       setLoading(true);
       setError('');
       await login(email, password);
-      navigate('/');
+      navigate(redirect || '/');
     } catch (err) {
       setError(err.message || 'Invalid email or password');
     } finally {
@@ -33,7 +35,7 @@ export const LoginPage = () => {
     try {
       setGuestLoading(true);
       await guestLogin('Guest Artist');
-      navigate('/');
+      navigate(redirect || '/');
     } catch (err) {
       setError('Failed to create guest session');
     } finally {
@@ -75,6 +77,26 @@ export const LoginPage = () => {
             Sign in to continue to your collaborative canvases
           </p>
         </div>
+
+        {redirect && (
+          <div
+            style={{
+              padding: '10px 14px',
+              borderRadius: 'var(--radius-md)',
+              background: 'rgba(99, 102, 241, 0.12)',
+              border: '1px solid rgba(99, 102, 241, 0.3)',
+              color: '#a5b4fc',
+              fontSize: '13px',
+              marginBottom: '18px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+            }}
+          >
+            <Sparkles size={16} color="var(--accent-primary)" style={{ flexShrink: 0 }} />
+            <span>Sign in or create an account to join this canvas room.</span>
+          </div>
+        )}
 
         {error && (
           <div
@@ -155,7 +177,10 @@ export const LoginPage = () => {
 
         <div style={{ textAlign: 'center', fontSize: '13px', color: 'var(--text-secondary)' }}>
           Don't have an account?{' '}
-          <Link to="/register" style={{ color: 'var(--accent-primary)', fontWeight: 600, textDecoration: 'none' }}>
+          <Link
+            to={redirect ? `/register?redirect=${encodeURIComponent(redirect)}` : '/register'}
+            style={{ color: 'var(--accent-primary)', fontWeight: 600, textDecoration: 'none' }}
+          >
             Sign up
           </Link>
         </div>

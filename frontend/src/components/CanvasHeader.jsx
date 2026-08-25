@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -7,6 +7,7 @@ import {
   Check,
   History,
   Download,
+  Upload,
   Users,
   MessageSquare,
   Shield,
@@ -21,6 +22,7 @@ export const CanvasHeader = ({
   activeUsers = [],
   onOpenSnapshots,
   onOpenExport,
+  onImportImage,
   isChatOpen,
   setIsChatOpen,
   isUsersOpen,
@@ -28,6 +30,9 @@ export const CanvasHeader = ({
   unreadChatCount = 0,
 }) => {
   const [copied, setCopied] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const isViewer = currentRole === 'viewer';
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(window.location.href);
@@ -35,8 +40,40 @@ export const CanvasHeader = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Strict validation: PNG and JPEG only
+    const validMimes = ['image/png', 'image/jpeg', 'image/jpg'];
+    const nameLower = file.name.toLowerCase();
+    const isPngOrJpeg = validMimes.includes(file.type) || nameLower.endsWith('.png') || nameLower.endsWith('.jpg') || nameLower.endsWith('.jpeg');
+
+    if (!isPngOrJpeg) {
+      alert('Only PNG and JPEG images are supported. SVG and JSON are not allowed.');
+      e.target.value = '';
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      if (onImportImage) onImportImage(event.target.result);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
   return (
     <header className="glass-panel floating-header">
+      {/* Hidden File Input for PNG / JPEG only */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/png, image/jpeg, .png, .jpg, .jpeg"
+        onChange={handleFileChange}
+        style={{ display: 'none' }}
+      />
+
       {/* Left: Back & Room Title */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
         <Link to="/" className="btn btn-secondary btn-icon" title="Exit to Lobby">
@@ -131,16 +168,28 @@ export const CanvasHeader = ({
         </button>
       </div>
 
-      {/* Right: Actions (Snapshot, Export, Chat toggle, Users toggle) */}
+      {/* Right: Actions (Import Image, Snapshot, Export, Chat toggle, Users toggle) */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {/* Import Image (PNG/JPEG only) */}
+        {!isViewer && (
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="btn btn-secondary"
+            title="Import PNG or JPEG image onto canvas"
+          >
+            <Upload size={16} />
+            <span>Import Image</span>
+          </button>
+        )}
+
         {/* Version History / Snapshots */}
         <button onClick={onOpenSnapshots} className="btn btn-secondary" title="Version History & Snapshots">
           <History size={16} />
           <span>Snapshots</span>
         </button>
 
-        {/* Export Modal trigger */}
-        <button onClick={onOpenExport} className="btn btn-primary" title="Export Canvas as PNG, SVG, JSON">
+        {/* Export Modal trigger (PNG & JPEG only) */}
+        <button onClick={onOpenExport} className="btn btn-primary" title="Export Canvas as PNG or JPEG">
           <Download size={16} />
           <span>Export</span>
         </button>

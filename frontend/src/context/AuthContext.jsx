@@ -93,7 +93,24 @@ export const AuthProvider = ({ children }) => {
     return data.user;
   };
 
-  const logout = () => {
+  const logout = async () => {
+    const currentToken = token || localStorage.getItem('collab_token');
+    const currentUser = user || (localStorage.getItem('collab_user') ? JSON.parse(localStorage.getItem('collab_user')) : null);
+
+    if (currentToken && currentUser?.isGuest) {
+      try {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${currentToken}`,
+          },
+        });
+      } catch (e) {
+        console.warn('Logout server notification error:', e);
+      }
+    }
+
     setToken(null);
     setUser(null);
     localStorage.removeItem('collab_token');

@@ -19,6 +19,7 @@ import {
   Crown,
   Eye,
   Edit3,
+  Trash2,
 } from 'lucide-react';
 
 export const LobbyPage = () => {
@@ -31,7 +32,11 @@ export const LobbyPage = () => {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [joinRoomCode, setJoinRoomCode] = useState('');
+  const [joinCodeLoading, setJoinCodeLoading] = useState(false);
+  const [joinCodeError, setJoinCodeError] = useState('');
   const [joinPassword, setJoinPassword] = useState('');
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
   const [showJoinPasswordModal, setShowJoinPasswordModal] = useState(null); // room object
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [guestLoading, setGuestLoading] = useState(false);
@@ -90,16 +95,58 @@ export const LobbyPage = () => {
     }
   };
 
-  const handleJoinByCode = (e) => {
+  const handleJoinByCode = async (e) => {
     e.preventDefault();
-    if (!joinRoomCode.trim()) return;
-    const cleanCode = joinRoomCode.trim().replace(/^room-/, '');
-    navigate(`/canvas/room-${cleanCode}`);
+    const raw = joinRoomCode.trim();
+    if (!raw) return;
+
+    setJoinCodeError('');
+    setJoinCodeLoading(true);
+
+    const cleanCode = raw.startsWith('room-') ? raw : `room-${raw.replace(/^#/, '')}`;
+
+    try {
+      // Check room metadata
+      const res = await fetch(`/api/rooms/${cleanCode}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success || !data.room) {
+        setJoinCodeError(data.message || 'Room not found. Please check the code.');
+        setJoinCodeLoading(false);
+        return;
+      }
+
+      const room = data.room;
+
+      // If room is private and user is not owner and not already a member
+      if (room.isPrivate && !room.isMember && room.userRole !== 'owner') {
+        setShowJoinPasswordModal(room);
+        setJoinPassword('');
+        setPasswordError('');
+        setJoinCodeLoading(false);
+        return;
+      }
+
+      // If user is not authenticated yet, initialize guest login
+      if (!isAuthenticated) {
+        await guestLogin('Guest Artist');
+      }
+
+      navigate(`/canvas/${room.roomId}`);
+    } catch (err) {
+      setJoinCodeError('Unable to connect to server. Please try again.');
+    } finally {
+      setJoinCodeLoading(false);
+    }
   };
 
   const handleEnterRoom = (room) => {
-    if (room.isPrivate) {
+    if (room.isPrivate && !room.isMember && room.userRole !== 'owner') {
       setShowJoinPasswordModal(room);
+      setJoinPassword('');
+      setPasswordError('');
     } else {
       navigate(`/canvas/${room.roomId}`);
     }
@@ -109,23 +156,61 @@ export const LobbyPage = () => {
     e.preventDefault();
     if (!showJoinPasswordModal) return;
 
+    if (!joinPassword.trim()) {
+      setPasswordError('Please enter the room password.');
+      return;
+    }
+
     try {
+      setPasswordLoading(true);
+      setPasswordError('');
+
+      let activeToken = token;
+      if (!activeToken) {
+        const guestUser = await guestLogin('Guest Artist');
+        activeToken = localStorage.getItem('collab_token');
+      }
+
       const res = await fetch(`/api/rooms/${showJoinPasswordModal.roomId}/join`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${activeToken}`,
         },
-        body: JSON.stringify({ password: joinPassword }),
+        body: JSON.stringify({ password: joinPassword.trim() }),
       });
       const data = await res.json();
       if (data.success) {
-        navigate(`/canvas/${showJoinPasswordModal.roomId}`);
+        const targetRoomId = showJoinPasswordModal.roomId;
+        setShowJoinPasswordModal(null);
+        navigate(`/canvas/${targetRoomId}`);
       } else {
-        alert(data.message || 'Incorrect room password');
+        setPasswordError(data.message || 'Incorrect room password. Please try again.');
       }
     } catch (err) {
-      alert('Failed to verify room password');
+      setPasswordError('Failed to verify room password. Please try again.');
+    } finally {
+      setPasswordLoading(false);
+    }
+  };
+
+  const handleDeleteRoom = async (roomId, e) => {
+    e.stopPropagation();
+    if (!window.confirm('Are you sure you want to permanently delete this canvas and all its drawing history?')) return;
+    try {
+      const res = await fetch(`/api/rooms/${roomId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.success) {
+        fetchPublicRooms();
+        fetchMyRooms();
+      } else {
+        alert(data.message || 'Failed to delete room');
+      }
+    } catch (err) {
+      alert('Error deleting room');
     }
   };
 
@@ -203,24 +288,40 @@ export const LobbyPage = () => {
         {/* Join by Code bar & Search */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '32px' }}>
           {/* Quick Join Card */}
-          <form onSubmit={handleJoinByCode} className="glass-card" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                JOIN VIA ROOM ID / CODE
+          <form onSubmit={handleJoinByCode} className="glass-card" style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Zap size={13} color="var(--accent-primary)" />
+                  <span>JOIN VIA ROOM ID / CODE</span>
+                </div>
+                <input
+                  type="text"
+                  className="input-field"
+                  placeholder="Enter Room Code (e.g. room-abc123)..."
+                  value={joinRoomCode}
+                  onChange={(e) => {
+                    setJoinRoomCode(e.target.value);
+                    if (joinCodeError) setJoinCodeError('');
+                  }}
+                  style={{ padding: '8px 12px' }}
+                />
               </div>
-              <input
-                type="text"
-                className="input-field"
-                placeholder="Enter Room Code (e.g. room-abc123)..."
-                value={joinRoomCode}
-                onChange={(e) => setJoinRoomCode(e.target.value)}
-                style={{ padding: '8px 12px' }}
-              />
+              <button
+                type="submit"
+                disabled={joinCodeLoading || !joinRoomCode.trim()}
+                className="btn btn-primary"
+                style={{ marginTop: '18px', padding: '9px 18px', opacity: joinCodeLoading ? 0.7 : 1 }}
+              >
+                <span>{joinCodeLoading ? 'Checking...' : 'Join'}</span>
+                <ArrowRight size={15} />
+              </button>
             </div>
-            <button type="submit" className="btn btn-primary" style={{ marginTop: '18px', padding: '9px 16px' }}>
-              <span>Join</span>
-              <ArrowRight size={15} />
-            </button>
+            {joinCodeError && (
+              <div style={{ fontSize: '12px', color: '#f87171', background: 'rgba(239, 68, 68, 0.12)', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(239, 68, 68, 0.25)' }}>
+                {joinCodeError}
+              </div>
+            )}
           </form>
 
           {/* Search Filter */}
@@ -389,7 +490,16 @@ export const LobbyPage = () => {
                         </div>
                         <h4 style={{ fontSize: '16px', fontWeight: 700 }}>{r.title}</h4>
                       </div>
-                      <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end' }}>
+                      <div style={{ marginTop: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <button
+                          onClick={(e) => handleDeleteRoom(r.roomId, e)}
+                          className="btn btn-danger"
+                          style={{ padding: '6px 12px', fontSize: '12px' }}
+                          title="Delete Canvas"
+                        >
+                          <Trash2 size={14} />
+                          <span>Delete</span>
+                        </button>
                         <button onClick={() => navigate(`/canvas/${r.roomId}`)} className="btn btn-primary" style={{ padding: '6px 14px', fontSize: '13px' }}>
                           Open Canvas
                         </button>
@@ -445,27 +555,65 @@ export const LobbyPage = () => {
       {/* Private Room Password Prompt Modal */}
       {showJoinPasswordModal && (
         <div className="modal-overlay" onClick={() => setShowJoinPasswordModal(null)}>
-          <div className="modal-content" style={{ maxWidth: '400px' }} onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ fontSize: '18px', marginBottom: '8px' }}>Private Canvas</h3>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
-              Please enter the password for "{showJoinPasswordModal.title}".
+          <div className="modal-content" style={{ maxWidth: '420px', padding: '24px' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+              <div style={{ width: '42px', height: '42px', borderRadius: '12px', background: 'rgba(236, 72, 153, 0.15)', border: '1px solid rgba(236, 72, 153, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Lock size={20} color="var(--accent-secondary)" />
+              </div>
+              <div>
+                <h3 style={{ fontSize: '18px', fontWeight: 700, margin: 0 }}>Password Protected Canvas</h3>
+                <span className="badge badge-primary" style={{ fontSize: '11px', marginTop: '2px' }}>
+                  {showJoinPasswordModal.roomId}
+                </span>
+              </div>
+            </div>
+
+            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px', lineHeight: 1.5 }}>
+              This canvas <strong style={{ color: '#fff' }}>"{showJoinPasswordModal.title}"</strong> is private. Please enter the room password to join.
             </p>
-            <form onSubmit={handlePrivateRoomSubmit}>
-              <input
-                type="password"
-                className="input-field"
-                placeholder="Enter password..."
-                value={joinPassword}
-                onChange={(e) => setJoinPassword(e.target.value)}
-                required
-                style={{ marginBottom: '16px' }}
-              />
-              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-                <button type="button" onClick={() => setShowJoinPasswordModal(null)} className="btn btn-secondary">
+
+            {passwordError && (
+              <div style={{ padding: '10px 14px', borderRadius: '8px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#f87171', fontSize: '13px', marginBottom: '14px' }}>
+                {passwordError}
+              </div>
+            )}
+
+            <form onSubmit={handlePrivateRoomSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
+                  ROOM PASSWORD
+                </label>
+                <input
+                  type="password"
+                  autoFocus
+                  className="input-field"
+                  placeholder="Enter password..."
+                  value={joinPassword}
+                  onChange={(e) => {
+                    setJoinPassword(e.target.value);
+                    if (passwordError) setPasswordError('');
+                  }}
+                  required
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '6px' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowJoinPasswordModal(null)}
+                  className="btn btn-secondary"
+                  disabled={passwordLoading}
+                >
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary">
-                  Enter Room
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={passwordLoading || !joinPassword.trim()}
+                  style={{ opacity: passwordLoading ? 0.7 : 1 }}
+                >
+                  <Lock size={14} />
+                  <span>{passwordLoading ? 'Verifying...' : 'Unlock & Enter'}</span>
                 </button>
               </div>
             </form>

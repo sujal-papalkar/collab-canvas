@@ -3,7 +3,9 @@ import User from '../models/User.js';
 import Room from '../models/Room.js';
 import RoomMember from '../models/RoomMember.js';
 import CanvasState from '../models/CanvasState.js';
+import CanvasSnapshot from '../models/CanvasSnapshot.js';
 import ChatMessage from '../models/ChatMessage.js';
+import bcrypt from 'bcryptjs';
 
 // In-memory active rooms presence cache
 // structure: roomsMap[roomId] = { users: Map<socketId, userData>, elements: Array, saveTimeout: Timer }
@@ -77,24 +79,56 @@ export const initializeSockets = (io) => {
     let currentRoomId = null;
 
     // Join room event
-    socket.on('join-room', async ({ roomId }) => {
+    socket.on('join-room', async ({ roomId, password }) => {
       try {
         if (!roomId) return;
-        currentRoomId = roomId;
-
-        socket.join(roomId);
 
         // Fetch room info from DB
         const roomDoc = await Room.findOne({ roomId });
-        let userRole = 'editor';
+        if (!roomDoc) {
+          socket.emit('room-error', { message: 'Room not found.' });
+          return;
+        }
 
-        if (roomDoc) {
-          if (socket.user.id && roomDoc.owner.toString() === socket.user.id.toString()) {
-            userRole = 'owner';
-          } else {
-            const member = await RoomMember.findOne({ roomId, userId: socket.user.id });
-            userRole = member ? member.role : roomDoc.defaultRole;
+        const isOwner = socket.user.id && roomDoc.owner.toString() === socket.user.id.toString();
+        let member = await RoomMember.findOne({ roomId, userId: socket.user.id });
+
+        // If private room, verify password or existing membership
+        if (roomDoc.isPrivate && !isOwner && !member) {
+          let verified = false;
+          if (password && roomDoc.passwordHash) {
+            const isMatch = await bcrypt.compare(password, roomDoc.passwordHash);
+            if (isMatch) {
+              verified = true;
+              member = await RoomMember.create({
+                roomId,
+                userId: socket.user.id,
+                role: roomDoc.defaultRole,
+              });
+            }
           }
+
+          if (!verified) {
+            socket.emit('room-auth-required', {
+              roomId,
+              title: roomDoc.title,
+              isPrivate: true,
+              message: 'Password required to join this private room.',
+            });
+            return;
+          }
+        }
+
+        currentRoomId = roomId;
+        socket.join(roomId);
+
+        let userRole = 'editor';
+        if (isOwner) {
+          userRole = 'owner';
+        } else if (member) {
+          userRole = member.role;
+        } else {
+          userRole = roomDoc.defaultRole;
         }
 
         socket.user.role = userRole;
@@ -395,24 +429,82 @@ export const initializeSockets = (io) => {
       });
     });
 
-    // Disconnect cleanup
-    socket.on('disconnect', () => {
-      // console.log(`[Socket] Client disconnected: ${socket.id}`);
-      if (currentRoomId && roomsMap.has(currentRoomId)) {
-        const roomData = roomsMap.get(currentRoomId);
-        roomData.users.delete(socket.id);
+    // Handle user exit (disconnect or leave-room) with guest room auto-cleanup
+    const handleUserExit = async (roomId, leavingSocket) => {
+      if (!roomId) return;
+      const roomData = roomsMap.get(roomId);
+      if (roomData) {
+        roomData.users.delete(leavingSocket.id);
+      }
 
-        socket.to(currentRoomId).emit('user-left', {
-          socketId: socket.id,
-          userId: socket.user.id,
-          username: socket.user.username,
+      try {
+        const roomDoc = await Room.findOne({ roomId }).populate('owner');
+        if (!roomDoc) return;
+
+        const userId = leavingSocket.user?.id?.toString();
+        const ownerId = (roomDoc.owner?._id || roomDoc.owner)?.toString();
+        const isOwner = (userId && ownerId && ownerId === userId) || leavingSocket.user?.role === 'owner';
+        const isGuestRoom = roomDoc.isGuestRoom === true || roomDoc.owner?.isGuest === true || (isOwner && leavingSocket.user?.isGuest === true);
+
+        // If it's a guest room and the host left OR if the room is now empty, delete it
+        const activeCount = roomData ? roomData.users.size : 0;
+        if (isGuestRoom && (isOwner || activeCount === 0)) {
+          // Notify any remaining peers
+          io.to(roomId).emit('room-closed', {
+            message: 'This temporary guest room has been closed because the host exited.',
+          });
+
+          if (roomData?.saveTimeout) {
+            clearTimeout(roomData.saveTimeout);
+          }
+
+          roomsMap.delete(roomId);
+
+          await Promise.all([
+            Room.deleteOne({ roomId }),
+            RoomMember.deleteMany({ roomId }),
+            CanvasState.deleteOne({ roomId }),
+            CanvasSnapshot.deleteMany({ roomId }),
+            ChatMessage.deleteMany({ roomId }),
+          ]);
+
+          console.log(`🧹 [Auto-Cleanup] Guest room ${roomId} deleted because host exited or room became empty.`);
+          return;
+        }
+      } catch (err) {
+        console.error(`Error during guest room cleanup for ${roomId}:`, err);
+      }
+
+      if (roomData) {
+        // Normal room leave broadcast
+        leavingSocket.to(roomId).emit('user-left', {
+          socketId: leavingSocket.id,
+          userId: leavingSocket.user?.id,
+          username: leavingSocket.user?.username,
           activeUsers: Array.from(roomData.users.values()),
         });
 
-        // Clean up empty room in memory after 10 minutes if inactive
         if (roomData.users.size === 0) {
-          scheduleCanvasSave(currentRoomId);
+          scheduleCanvasSave(roomId);
         }
+      }
+    };
+
+    // Explicit leave-room event
+    socket.on('leave-room', async () => {
+      if (currentRoomId) {
+        const rId = currentRoomId;
+        currentRoomId = null;
+        socket.leave(rId);
+        await handleUserExit(rId, socket);
+      }
+    });
+
+    // Disconnect cleanup
+    socket.on('disconnect', async () => {
+      // console.log(`[Socket] Client disconnected: ${socket.id}`);
+      if (currentRoomId) {
+        await handleUserExit(currentRoomId, socket);
       }
     });
   });
