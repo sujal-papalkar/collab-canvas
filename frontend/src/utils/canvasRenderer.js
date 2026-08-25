@@ -486,3 +486,197 @@ export const renderLaserTrails = (ctx, trails) => {
   }
   ctx.restore();
 };
+
+/**
+ * Intersects segment p1 -> p2 with a circle at (cx, cy) with radius r.
+ * Returns array of t values in (0, 1) where intersection occurs.
+ */
+function getSegmentCircleIntersections(p1, p2, cx, cy, r) {
+  const dx = p2.x - p1.x;
+  const dy = p2.y - p1.y;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return [];
+
+  const fx = p1.x - cx;
+  const fy = p1.y - cy;
+
+  const a = lenSq;
+  const b = 2 * (fx * dx + fy * dy);
+  const c = fx * fx + fy * fy - r * r;
+
+  const discriminant = b * b - 4 * a * c;
+  if (discriminant < 0) return [];
+
+  const tValues = [];
+  const sqrtD = Math.sqrt(discriminant);
+  const t1 = (-b - sqrtD) / (2 * a);
+  const t2 = (-b + sqrtD) / (2 * a);
+
+  if (t1 > 0 && t1 < 1) tValues.push(t1);
+  if (t2 > 0 && t2 < 1 && Math.abs(t2 - t1) > 1e-4) tValues.push(t2);
+
+  return tValues.sort((u, v) => u - v);
+}
+
+/**
+ * Erase part of an element inside a circle (cx, cy, radius).
+ * Returns { modified: boolean, replacementElements: [] }
+ */
+export const eraseElementAtCircle = (el, cx, cy, radius, generateId) => {
+  const bounds = getElementBounds(el);
+  const pad = Math.max(radius, (el.strokeWidth || 4));
+
+  // Quick reject bounding box check
+  if (
+    cx + radius < bounds.minX ||
+    cx - radius > bounds.maxX ||
+    cy + radius < bounds.minY ||
+    cy - radius > bounds.maxY
+  ) {
+    return { modified: false, replacementElements: [el] };
+  }
+
+  // 1. Freehand strokes (pencil, brush, highlighter)
+  if (['pencil', 'brush', 'highlighter'].includes(el.type)) {
+    if (!el.points || el.points.length === 0) {
+      return { modified: true, replacementElements: [] };
+    }
+
+    const rSq = radius * radius;
+    const isPointInside = (p) => (p.x - cx) ** 2 + (p.y - cy) ** 2 <= rSq;
+
+    if (el.points.length === 1) {
+      if (isPointInside(el.points[0])) {
+        return { modified: true, replacementElements: [] };
+      }
+      return { modified: false, replacementElements: [el] };
+    }
+
+    const continuousPieces = [];
+    let currentPiece = [];
+    let anyErased = false;
+
+    for (let i = 0; i < el.points.length - 1; i++) {
+      const p1 = el.points[i];
+      const p2 = el.points[i + 1];
+
+      const tValues = getSegmentCircleIntersections(p1, p2, cx, cy, radius);
+
+      const subPoints = [p1];
+      for (const t of tValues) {
+        subPoints.push({
+          x: p1.x + t * (p2.x - p1.x),
+          y: p1.y + t * (p2.y - p1.y),
+        });
+      }
+      subPoints.push(p2);
+
+      for (let s = 0; s < subPoints.length - 1; s++) {
+        const sp1 = subPoints[s];
+        const sp2 = subPoints[s + 1];
+        const midX = (sp1.x + sp2.x) / 2;
+        const midY = (sp1.y + sp2.y) / 2;
+        const midIn = (midX - cx) ** 2 + (midY - cy) ** 2 < rSq;
+
+        if (midIn) {
+          anyErased = true;
+          if (currentPiece.length > 0) {
+            continuousPieces.push(currentPiece);
+            currentPiece = [];
+          }
+        } else {
+          if (currentPiece.length === 0) {
+            currentPiece.push(sp1);
+          }
+          currentPiece.push(sp2);
+        }
+      }
+    }
+
+    if (currentPiece.length > 0) {
+      continuousPieces.push(currentPiece);
+    }
+
+    if (!anyErased) {
+      return { modified: false, replacementElements: [el] };
+    }
+
+    const validPieces = continuousPieces.filter((pts) => pts.length >= 2);
+
+    if (validPieces.length === 0) {
+      return { modified: true, replacementElements: [] };
+    }
+
+    const replacements = validPieces.map((pts, idx) => ({
+      ...el,
+      id: idx === 0 ? el.id : (generateId ? generateId() : `split-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`),
+      points: pts,
+    }));
+
+    return { modified: true, replacementElements: replacements };
+  }
+
+  // 2. Straight Lines and Arrows
+  if (['line', 'arrow'].includes(el.type)) {
+    const p1 = { x: el.x1 || 0, y: el.y1 || 0 };
+    const p2 = { x: el.x2 || 0, y: el.y2 || 0 };
+    const rSq = radius * radius;
+    const p1In = (p1.x - cx) ** 2 + (p1.y - cy) ** 2 <= rSq;
+    const p2In = (p2.x - cx) ** 2 + (p2.y - cy) ** 2 <= rSq;
+
+    const tValues = getSegmentCircleIntersections(p1, p2, cx, cy, radius);
+
+    if (p1In && p2In) {
+      return { modified: true, replacementElements: [] };
+    }
+
+    if (tValues.length === 0) {
+      return { modified: false, replacementElements: [el] };
+    }
+
+    if (tValues.length === 1) {
+      const t = tValues[0];
+      const cut = { x: p1.x + t * (p2.x - p1.x), y: p1.y + t * (p2.y - p1.y) };
+      if (p1In) {
+        return { modified: true, replacementElements: [{ ...el, x1: cut.x, y1: cut.y }] };
+      } else {
+        return { modified: true, replacementElements: [{ ...el, x2: cut.x, y2: cut.y }] };
+      }
+    }
+
+    if (tValues.length === 2) {
+      const cut1 = { x: p1.x + tValues[0] * (p2.x - p1.x), y: p1.y + tValues[0] * (p2.y - p1.y) };
+      const cut2 = { x: p1.x + tValues[1] * (p2.x - p1.x), y: p1.y + tValues[1] * (p2.y - p1.y) };
+      const line1 = { ...el, x2: cut1.x, y2: cut1.y };
+      const line2 = {
+        ...el,
+        id: generateId ? generateId() : `split-line-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        x1: cut2.x,
+        y1: cut2.y,
+      };
+      return { modified: true, replacementElements: [line1, line2] };
+    }
+  }
+
+  // 3. Solid shapes (rectangle, circle, triangle, star, text, sticky, image)
+  if (isPointInElement(cx, cy, el)) {
+    return { modified: true, replacementElements: [] };
+  }
+
+  return { modified: false, replacementElements: [el] };
+};
+
+/**
+ * Render eraser circle cursor overlay
+ */
+export const renderEraserCursor = (ctx, screenX, screenY, screenRadius) => {
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(screenX, screenY, screenRadius, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+  ctx.lineWidth = 1.5;
+  ctx.fillStyle = 'rgba(239, 68, 68, 0.22)';
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+};

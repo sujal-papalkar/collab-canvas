@@ -42,6 +42,8 @@ export const CanvasToolbar = ({
   setOpacity,
   fontSize,
   setFontSize,
+  eraserSize = 20,
+  setEraserSize,
   currentRole,
 }) => {
   const [showShapeMenu, setShowShapeMenu] = useState(false);
@@ -236,7 +238,50 @@ export const CanvasToolbar = ({
             gap: '12px',
           }}
         >
+          {/* Eraser Size Controls */}
+          {activeTool === 'eraser' && (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                <span>ERASER RADIUS</span>
+                <span style={{ color: 'var(--accent-rose)' }}>{eraserSize}px</span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', marginTop: '6px', marginBottom: '8px' }}>
+                {[
+                  { label: 'Small', size: 10 },
+                  { label: 'Medium', size: 20 },
+                  { label: 'Large', size: 36 },
+                ].map(({ label, size }) => (
+                  <button
+                    key={size}
+                    onClick={() => setEraserSize && setEraserSize(size)}
+                    style={{
+                      padding: '5px 4px',
+                      borderRadius: '6px',
+                      background: eraserSize === size ? 'var(--accent-rose)' : 'rgba(255,255,255,0.06)',
+                      color: eraserSize === size ? '#fff' : 'var(--text-secondary)',
+                      border: '1px solid var(--border-color)',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <input
+                type="range"
+                min="6"
+                max="60"
+                value={eraserSize}
+                onChange={(e) => setEraserSize && setEraserSize(parseInt(e.target.value, 10))}
+                style={{ width: '100%', accentColor: 'var(--accent-rose)', cursor: 'pointer' }}
+              />
+            </div>
+          )}
+
           {/* Stroke Color */}
+          {activeTool !== 'eraser' && (
           <div>
             <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
               Stroke Color
@@ -275,6 +320,7 @@ export const CanvasToolbar = ({
               }}
             />
           </div>
+          )}
 
           {/* Fill Color for Shapes & Sticky */}
           {['rectangle', 'rounded-rect', 'circle', 'triangle', 'star', 'sticky'].includes(activeTool) && (
@@ -314,66 +360,68 @@ export const CanvasToolbar = ({
             </div>
           )}
 
-          {/* Stroke Width */}
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>
-              <span>STROKE WIDTH</span>
-              <span>{strokeWidth}px</span>
-            </div>
-            <input
-              type="range"
-              min="1"
-              max="24"
-              value={strokeWidth}
-              onChange={(e) => setStrokeWidth(parseInt(e.target.value, 10))}
-              style={{ width: '100%', marginTop: '6px', accentColor: 'var(--accent-primary)', cursor: 'pointer' }}
-            />
-          </div>
+          {/* Stroke Width & Style */}
+          {activeTool !== 'eraser' && (
+            <>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                  <span>STROKE WIDTH</span>
+                  <span>{strokeWidth}px</span>
+                </div>
+                <input
+                  type="range"
+                  min="1"
+                  max="24"
+                  value={strokeWidth}
+                  onChange={(e) => setStrokeWidth(parseInt(e.target.value, 10))}
+                  style={{ width: '100%', marginTop: '6px', accentColor: 'var(--accent-primary)', cursor: 'pointer' }}
+                />
+              </div>
 
-          {/* Stroke Style */}
-          <div>
-            <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              Stroke Style
-            </label>
-            <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
-              {['solid', 'dashed', 'dotted'].map((style) => (
-                <button
-                  key={style}
-                  onClick={() => setStrokeStyle(style)}
-                  style={{
-                    flex: 1,
-                    padding: '4px',
-                    borderRadius: '6px',
-                    background: strokeStyle === style ? 'var(--accent-primary)' : 'rgba(255,255,255,0.06)',
-                    color: strokeStyle === style ? '#fff' : 'var(--text-secondary)',
-                    border: '1px solid var(--border-color)',
-                    fontSize: '11px',
-                    textTransform: 'capitalize',
-                    cursor: 'pointer',
-                  }}
-                >
-                  {style}
-                </button>
-              ))}
-            </div>
-          </div>
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Stroke Style
+                </label>
+                <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                  {['solid', 'dashed', 'dotted'].map((style) => (
+                    <button
+                      key={style}
+                      onClick={() => setStrokeStyle(style)}
+                      style={{
+                        flex: 1,
+                        padding: '4px',
+                        borderRadius: '6px',
+                        background: strokeStyle === style ? 'var(--accent-primary)' : 'rgba(255,255,255,0.06)',
+                        color: strokeStyle === style ? '#fff' : 'var(--text-secondary)',
+                        border: '1px solid var(--border-color)',
+                        fontSize: '11px',
+                        textTransform: 'capitalize',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {style}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-          {/* Opacity */}
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>
-              <span>OPACITY</span>
-              <span>{Math.round(opacity * 100)}%</span>
-            </div>
-            <input
-              type="range"
-              min="0.1"
-              max="1"
-              step="0.05"
-              value={opacity}
-              onChange={(e) => setOpacity(parseFloat(e.target.value))}
-              style={{ width: '100%', marginTop: '6px', accentColor: 'var(--accent-primary)', cursor: 'pointer' }}
-            />
-          </div>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                  <span>OPACITY</span>
+                  <span>{Math.round(opacity * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0.1"
+                  max="1"
+                  step="0.05"
+                  value={opacity}
+                  onChange={(e) => setOpacity(parseFloat(e.target.value))}
+                  style={{ width: '100%', marginTop: '6px', accentColor: 'var(--accent-primary)', cursor: 'pointer' }}
+                />
+              </div>
+            </>
+          )}
 
           {/* Font Size for Text */}
           {activeTool === 'text' && (

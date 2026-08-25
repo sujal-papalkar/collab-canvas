@@ -13,6 +13,8 @@ export const SocketProvider = ({ children }) => {
   const [chatMessages, setChatMessages] = useState([]);
   const [typingUsers, setTypingUsers] = useState({});
   const [currentRole, setCurrentRole] = useState('editor');
+  const [pendingRequests, setPendingRequests] = useState([]);
+  const currentRoomIdRef = useRef(null);
 
   // Initialize socket connection
   useEffect(() => {
@@ -47,6 +49,16 @@ export const SocketProvider = ({ children }) => {
       console.warn('Socket connection warning:', err.message);
     });
 
+    // Host received a join request
+    socket.on('join-request-received', ({ allPending }) => {
+      if (allPending) setPendingRequests(allPending);
+    });
+
+    // Host pending requests list update
+    socket.on('pending-requests-updated', ({ allPending }) => {
+      setPendingRequests(allPending || []);
+    });
+
     // Cleanup on unmount or user change
     return () => {
       socket.disconnect();
@@ -56,6 +68,7 @@ export const SocketProvider = ({ children }) => {
   // Join a canvas room
   const joinRoom = (roomId, password = null) => {
     if (!socketRef.current || !roomId) return;
+    currentRoomIdRef.current = roomId;
 
     socketRef.current.emit('join-room', { roomId, password });
 
@@ -68,9 +81,11 @@ export const SocketProvider = ({ children }) => {
   const leaveRoom = () => {
     if (!socketRef.current) return;
     socketRef.current.emit('leave-room');
+    currentRoomIdRef.current = null;
     setActiveUsers([]);
     setRemoteCursors({});
     setChatMessages([]);
+    setPendingRequests([]);
   };
 
   // Send live cursor coordinates
@@ -139,6 +154,26 @@ export const SocketProvider = ({ children }) => {
     socketRef.current.emit('update-user-role', { targetUserId, newRole });
   };
 
+  // Approve applicant join request (Owner only)
+  const approveJoinRequest = (roomId, applicantUserId, role = 'editor') => {
+    if (!socketRef.current || !isConnected) return;
+    socketRef.current.emit('approve-join-request', { roomId: roomId || currentRoomIdRef.current, applicantUserId, role });
+    setPendingRequests((prev) => prev.filter((r) => r.userId?.toString() !== applicantUserId?.toString()));
+  };
+
+  // Deny applicant join request (Owner only)
+  const denyJoinRequest = (roomId, applicantUserId) => {
+    if (!socketRef.current || !isConnected) return;
+    socketRef.current.emit('deny-join-request', { roomId: roomId || currentRoomIdRef.current, applicantUserId });
+    setPendingRequests((prev) => prev.filter((r) => r.userId?.toString() !== applicantUserId?.toString()));
+  };
+
+  // Cancel own join request (Applicant)
+  const cancelJoinRequest = (roomId) => {
+    if (!socketRef.current || !isConnected) return;
+    socketRef.current.emit('cancel-join-request', { roomId: roomId || currentRoomIdRef.current });
+  };
+
   return (
     <SocketContext.Provider
       value={{
@@ -154,6 +189,8 @@ export const SocketProvider = ({ children }) => {
         setTypingUsers,
         currentRole,
         setCurrentRole,
+        pendingRequests,
+        setPendingRequests,
         joinRoom,
         leaveRoom,
         sendCursorMove,
@@ -167,6 +204,9 @@ export const SocketProvider = ({ children }) => {
         sendChatMessage,
         sendTypingStatus,
         updateUserRole,
+        approveJoinRequest,
+        denyJoinRequest,
+        cancelJoinRequest,
       }}
     >
       {children}

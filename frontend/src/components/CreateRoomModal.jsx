@@ -11,6 +11,7 @@ export const CreateRoomModal = ({ isOpen, onClose, onRoomCreated }) => {
   const [description, setDescription] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
   const [password, setPassword] = useState('');
+  const [requireApproval, setRequireApproval] = useState(true);
   const [defaultRole, setDefaultRole] = useState('editor');
   const [maxUsers, setMaxUsers] = useState(20);
   const [loading, setLoading] = useState(false);
@@ -45,6 +46,7 @@ export const CreateRoomModal = ({ isOpen, onClose, onRoomCreated }) => {
           description: description.trim(),
           isPrivate,
           password: isPrivate ? password : null,
+          requireApproval,
           defaultRole,
           maxUsers,
         }),
@@ -232,6 +234,39 @@ export const CreateRoomModal = ({ isOpen, onClose, onRoomCreated }) => {
                 👁️ Viewer (Read Only)
               </button>
             </div>
+          </div>
+
+          {/* Host Approval Toggle */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '12px 14px',
+              borderRadius: 'var(--radius-md)',
+              background: requireApproval ? 'rgba(99, 102, 241, 0.12)' : 'rgba(255, 255, 255, 0.03)',
+              border: requireApproval ? '1.5px solid var(--accent-primary)' : '1px solid var(--border-color)',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+            }}
+            onClick={() => setRequireApproval(!requireApproval)}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{ width: '34px', height: '34px', borderRadius: '8px', background: requireApproval ? 'rgba(99, 102, 241, 0.25)' : 'rgba(255, 255, 255, 0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Shield size={18} color={requireApproval ? 'var(--accent-primary)' : 'var(--text-secondary)'} />
+              </div>
+              <div>
+                <div style={{ fontSize: '13px', fontWeight: 600, color: '#fff' }}>Require Host Approval to Join</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Visitors must be approved by the owner before entering</div>
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={requireApproval}
+              onChange={(e) => setRequireApproval(e.target.checked)}
+              onClick={(e) => e.stopPropagation()}
+              style={{ width: '18px', height: '18px', accentColor: 'var(--accent-primary)', cursor: 'pointer' }}
+            />
           </div>
 
           {/* Submit */}

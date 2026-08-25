@@ -41,7 +41,7 @@ export const RemoteCursors = ({ remoteCursors = {}, worldToScreen }) => {
       }}
     >
       {cursorsList.map((c) => {
-        if (!c.x || !c.y) return null;
+        if (c.x === undefined || c.y === undefined || c.x === null || c.y === null) return null;
         const screenPos = worldToScreen(c.x, c.y);
 
         // Don't render if outside window viewport

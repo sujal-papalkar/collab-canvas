@@ -5,10 +5,13 @@ export const CollaboratorsSidebar = ({
   isOpen,
   onClose,
   activeUsers = [],
+  pendingRequests = [],
   currentUserId,
   isOwner,
   onUpdateRole,
   onKickUser,
+  onApproveRequest,
+  onDenyRequest,
   room,
 }) => {
   if (!isOpen) return null;
@@ -42,9 +45,92 @@ export const CollaboratorsSidebar = ({
           padding: '16px',
           display: 'flex',
           flexDirection: 'column',
-          gap: '10px',
+          gap: '12px',
         }}
       >
+        {/* Pending Join Requests (Owner only) */}
+        {isOwner && pendingRequests.length > 0 && (
+          <div style={{ marginBottom: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'var(--accent-secondary)', animation: 'pulse 1.5s infinite' }} />
+                Pending Join Requests ({pendingRequests.length})
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {pendingRequests.map((req) => (
+                <div
+                  key={req.userId || req.socketId}
+                  style={{
+                    padding: '10px 12px',
+                    borderRadius: 'var(--radius-md)',
+                    background: 'rgba(236, 72, 153, 0.08)',
+                    border: '1px solid rgba(236, 72, 153, 0.25)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div
+                      style={{
+                        width: '28px',
+                        height: '28px',
+                        borderRadius: '50%',
+                        background: req.avatarColor || '#6366f1',
+                        color: '#fff',
+                        fontWeight: 700,
+                        fontSize: '12px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      {req.username?.charAt(0).toUpperCase() || '?'}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '13px', fontWeight: 600, color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {req.username}
+                      </div>
+                      <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                        {req.isGuest ? 'Guest user' : 'Registered user'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <button
+                      onClick={() => onApproveRequest && onApproveRequest(req.userId, 'editor')}
+                      className="btn btn-primary"
+                      style={{ flex: 1, padding: '5px 8px', fontSize: '11px', background: 'linear-gradient(135deg, #10b981, #059669)' }}
+                      title="Admit with drawing permission"
+                    >
+                      Allow (Editor)
+                    </button>
+                    <button
+                      onClick={() => onApproveRequest && onApproveRequest(req.userId, 'viewer')}
+                      className="btn btn-secondary"
+                      style={{ padding: '5px 8px', fontSize: '11px' }}
+                      title="Admit as read-only viewer"
+                    >
+                      Viewer
+                    </button>
+                    <button
+                      onClick={() => onDenyRequest && onDenyRequest(req.userId)}
+                      className="btn btn-danger btn-icon"
+                      style={{ width: '28px', height: '28px' }}
+                      title="Decline request"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ height: '1px', background: 'var(--border-color)', margin: '14px 0' }} />
+          </div>
+        )}
         {activeUsers.map((u) => {
           const isMe = u.userId === currentUserId;
           const userIsOwner = u.role === 'owner';

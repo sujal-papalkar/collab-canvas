@@ -17,6 +17,7 @@ export const useCanvas = ({ socket, isConnected, currentRole }) => {
   const [strokeStyle, setStrokeStyle] = useState('solid'); // 'solid' | 'dashed' | 'dotted'
   const [opacity, setOpacity] = useState(1);
   const [fontSize, setFontSize] = useState(24);
+  const [eraserSize, setEraserSize] = useState(20); // 10 (small), 20 (medium), 36 (large)
   const [backgroundColor, setBackgroundColor] = useState('#12131c');
   const [gridType, setGridType] = useState('dots'); // 'dots' | 'grid' | 'none'
   const [snapToGrid, setSnapToGrid] = useState(false);
@@ -160,6 +161,8 @@ export const useCanvas = ({ socket, isConnected, currentRole }) => {
     setOpacity,
     fontSize,
     setFontSize,
+    eraserSize,
+    setEraserSize,
     backgroundColor,
     setBackgroundColor,
     gridType,

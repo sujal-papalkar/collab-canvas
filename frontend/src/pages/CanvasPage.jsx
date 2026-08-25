@@ -19,10 +19,12 @@ import {
   renderSelectionBox,
   renderRemoteSelection,
   renderLaserTrails,
+  renderEraserCursor,
+  eraseElementAtCircle,
   isPointInElement,
   getElementBounds,
 } from '../utils/canvasRenderer';
-import { Lock, ShieldAlert, ArrowLeft } from 'lucide-react';
+import { Lock, ShieldAlert, ArrowLeft, Shield, Clock, Check, X, UserPlus, Bell } from 'lucide-react';
 
 export const CanvasPage = () => {
   const { roomId } = useParams();
@@ -41,6 +43,8 @@ export const CanvasPage = () => {
     setTypingUsers,
     currentRole,
     setCurrentRole,
+    pendingRequests,
+    setPendingRequests,
     joinRoom,
     leaveRoom,
     sendCursorMove,
@@ -54,6 +58,9 @@ export const CanvasPage = () => {
     sendChatMessage,
     sendTypingStatus,
     updateUserRole,
+    approveJoinRequest,
+    denyJoinRequest,
+    cancelJoinRequest,
   } = useSocket();
 
   const [room, setRoom] = useState(null);
@@ -63,12 +70,16 @@ export const CanvasPage = () => {
   const [passwordInput, setPasswordInput] = useState('');
   const [passwordError, setPasswordError] = useState('');
   const [passwordLoading, setPasswordLoading] = useState(false);
+  const [isWaitingApproval, setIsWaitingApproval] = useState(false);
+  const [waitingApprovalInfo, setWaitingApprovalInfo] = useState(null);
+  const [approvalDeniedMessage, setApprovalDeniedMessage] = useState('');
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isUsersOpen, setIsUsersOpen] = useState(false);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const [showSnapshots, setShowSnapshots] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [cursorThrottleTimeout, setCursorThrottleTimeout] = useState(null);
+  const mouseScreenPosRef = useRef({ x: -100, y: -100 });
 
   // Redirect to signup/login if visitor is not authenticated
   useEffect(() => {
@@ -97,6 +108,8 @@ export const CanvasPage = () => {
     setOpacity,
     fontSize,
     setFontSize,
+    eraserSize,
+    setEraserSize,
     backgroundColor,
     setBackgroundColor,
     gridType,
@@ -220,10 +233,35 @@ export const CanvasPage = () => {
 
     // Initial state sync from server
     socket.on('init-room-state', (data) => {
+      setIsWaitingApproval(false);
+      setApprovalDeniedMessage('');
       if (data.elements) setElements(data.elements);
       if (data.backgroundColor) setBackgroundColor(data.backgroundColor);
       if (data.activeUsers) setActiveUsers(data.activeUsers);
       if (data.role) setCurrentRole(data.role);
+    });
+
+    // Applicant waiting for host approval
+    socket.on('join-request-pending', (data) => {
+      setIsWaitingApproval(true);
+      setWaitingApprovalInfo(data);
+    });
+
+    // Host approved applicant
+    socket.on('join-request-approved', (data) => {
+      setIsWaitingApproval(false);
+      setApprovalDeniedMessage('');
+      if (data.elements) setElements(data.elements);
+      if (data.backgroundColor) setBackgroundColor(data.backgroundColor);
+      if (data.activeUsers) setActiveUsers(data.activeUsers);
+      if (data.role) setCurrentRole(data.role);
+      confetti({ particleCount: 70, spread: 70, origin: { y: 0.6 } });
+    });
+
+    // Host denied applicant
+    socket.on('join-request-denied', (data) => {
+      setIsWaitingApproval(false);
+      setApprovalDeniedMessage(data.message || 'The room host declined your request to join.');
     });
 
     socket.on('room-auth-required', () => {
@@ -376,6 +414,9 @@ export const CanvasPage = () => {
     // Cleanup listeners on room change
     return () => {
       socket.off('init-room-state');
+      socket.off('join-request-pending');
+      socket.off('join-request-approved');
+      socket.off('join-request-denied');
       socket.off('room-auth-required');
       socket.off('room-error');
       socket.off('user-joined');
@@ -478,6 +519,11 @@ export const CanvasPage = () => {
 
       ctx.restore();
 
+      // 9. Render local Eraser Ring Cursor overlay
+      if (activeTool === 'eraser' && mouseScreenPosRef.current) {
+        renderEraserCursor(ctx, mouseScreenPosRef.current.x, mouseScreenPosRef.current.y, eraserSize || 20);
+      }
+
       animationFrameId = requestAnimationFrame(render);
     };
 
@@ -497,6 +543,8 @@ export const CanvasPage = () => {
     remoteSelections,
     laserTrails,
     editingText,
+    activeTool,
+    eraserSize,
   ]);
 
   // 5. Mouse / Pointer Event Handlers
@@ -662,6 +710,7 @@ export const CanvasPage = () => {
 
   const handlePointerMove = (e) => {
     const { clientX, clientY } = e;
+    mouseScreenPosRef.current = { x: clientX, y: clientY };
     const worldPoint = screenToWorld(clientX, clientY);
 
     // Throttled cursor broadcast
@@ -720,7 +769,7 @@ export const CanvasPage = () => {
       return;
     }
 
-    // Eraser dragging
+    // Eraser dragging (precision circular area eraser)
     if (activeTool === 'eraser' && isDrawingRef.current) {
       eraseAtPoint(worldPoint.x, worldPoint.y);
       return;
@@ -797,14 +846,58 @@ export const CanvasPage = () => {
     }
   };
 
-  // Erase elements hit by point
+  // Erase elements hit by circular eraser contact zone (precision area eraser)
   const eraseAtPoint = (wx, wy) => {
-    const hitElements = elements.filter((el) => isPointInElement(wx, wy, el));
-    if (hitElements.length > 0) {
-      const idsToDelete = hitElements.map((el) => el.id);
+    const worldRadius = (eraserSize || 20) / zoom;
+    let hasChanges = false;
+    const newElements = [];
+    const elementsToUpdate = [];
+    const elementsToCreate = [];
+    const elementsToDelete = [];
+
+    for (const el of elements) {
+      const { modified, replacementElements } = eraseElementAtCircle(el, wx, wy, worldRadius, uuidv4);
+      if (!modified) {
+        newElements.push(el);
+      } else {
+        hasChanges = true;
+        if (replacementElements.length === 0) {
+          elementsToDelete.push(el.id);
+        } else {
+          // First piece (if same ID, it's an update)
+          const first = replacementElements[0];
+          if (first.id === el.id) {
+            elementsToUpdate.push(first);
+            newElements.push(first);
+          } else {
+            elementsToDelete.push(el.id);
+            elementsToCreate.push(first);
+            newElements.push(first);
+          }
+
+          // Remaining split segments are new elements
+          for (let i = 1; i < replacementElements.length; i++) {
+            const piece = replacementElements[i];
+            elementsToCreate.push(piece);
+            newElements.push(piece);
+          }
+        }
+      }
+    }
+
+    if (hasChanges) {
       pushUndo(elements);
-      setElements((prev) => prev.filter((el) => !idsToDelete.includes(el.id)));
-      sendElementDelete(idsToDelete);
+      setElements(newElements);
+
+      if (elementsToDelete.length > 0) {
+        sendElementDelete(elementsToDelete);
+      }
+      for (const updatedEl of elementsToUpdate) {
+        sendElementUpdate(updatedEl.id, updatedEl);
+      }
+      for (const createdEl of elementsToCreate) {
+        sendElementCreate(createdEl);
+      }
     }
   };
 
@@ -1046,6 +1139,8 @@ export const CanvasPage = () => {
         setOpacity={setOpacity}
         fontSize={fontSize}
         setFontSize={setFontSize}
+        eraserSize={eraserSize}
+        setEraserSize={setEraserSize}
         currentRole={currentRole}
       />
 
@@ -1076,6 +1171,65 @@ export const CanvasPage = () => {
         currentRole={currentRole}
       />
 
+      {/* Floating Host Admission Notification Banner (Owner only) */}
+      {currentRole === 'owner' && pendingRequests.length > 0 && (
+        <div
+          className="glass-card"
+          style={{
+            position: 'fixed',
+            top: '80px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 100,
+            padding: '12px 18px',
+            border: '1.5px solid var(--accent-secondary)',
+            boxShadow: '0 12px 36px rgba(236, 72, 153, 0.25)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '14px',
+            maxWidth: '520px',
+            width: '90%',
+            animation: 'fadeIn 0.3s ease-out',
+          }}
+        >
+          <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: 'rgba(236, 72, 153, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <UserPlus size={20} color="var(--accent-secondary)" />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: '#fff' }}>
+              {pendingRequests[0]?.username} wants to join
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+              {pendingRequests.length > 1 ? `+ ${pendingRequests.length - 1} other waiting` : 'Waiting for your approval'}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+            <button
+              onClick={() => approveJoinRequest(roomId, pendingRequests[0]?.userId, 'editor')}
+              className="btn btn-primary"
+              style={{ padding: '6px 12px', fontSize: '12px', background: 'linear-gradient(135deg, #10b981, #059669)' }}
+            >
+              <Check size={14} /> Allow (Editor)
+            </button>
+            <button
+              onClick={() => approveJoinRequest(roomId, pendingRequests[0]?.userId, 'viewer')}
+              className="btn btn-secondary"
+              style={{ padding: '6px 10px', fontSize: '12px' }}
+            >
+              Viewer
+            </button>
+            <button
+              onClick={() => denyJoinRequest(roomId, pendingRequests[0]?.userId)}
+              className="btn btn-danger btn-icon"
+              style={{ width: '32px', height: '32px' }}
+              title="Decline"
+            >
+              <X size={15} />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* HTML5 Canvas Surface */}
       <canvas
         ref={canvasRef}
@@ -1093,7 +1247,7 @@ export const CanvasPage = () => {
               : activeTool === 'laser'
               ? 'crosshair'
               : activeTool === 'eraser'
-              ? 'cell'
+              ? 'none'
               : activeTool === 'select'
               ? 'default'
               : 'crosshair',
@@ -1158,9 +1312,12 @@ export const CanvasPage = () => {
         isOpen={isUsersOpen}
         onClose={() => setIsUsersOpen(false)}
         activeUsers={activeUsers}
+        pendingRequests={pendingRequests}
         currentUserId={user?.id || user?._id}
         isOwner={currentRole === 'owner'}
         onUpdateRole={(targetUserId, newRole) => updateUserRole(targetUserId, newRole)}
+        onApproveRequest={(targetUserId, role) => approveJoinRequest(roomId, targetUserId, role)}
+        onDenyRequest={(targetUserId) => denyJoinRequest(roomId, targetUserId)}
         onKickUser={(targetUserId) => {
           if (window.confirm('Remove this collaborator from the room?')) {
             fetch(`/api/rooms/${roomId}/members/${targetUserId}`, {
@@ -1295,6 +1452,56 @@ export const CanvasPage = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Waiting for Host Approval Screen */}
+      {isWaitingApproval && !roomLoading && !roomError && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(10, 11, 16, 0.95)', backdropFilter: 'blur(20px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 130, padding: '24px' }}>
+          <div className="glass-card" style={{ maxWidth: '440px', width: '100%', padding: '36px 28px', textAlign: 'center', border: '1px solid rgba(99, 102, 241, 0.35)', boxShadow: '0 25px 60px -15px rgba(0,0,0,0.7)' }}>
+            <div style={{ position: 'relative', width: '64px', height: '64px', margin: '0 auto 18px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ width: '52px', height: '52px', borderRadius: '16px', background: 'rgba(99, 102, 241, 0.2)', border: '1.5px solid var(--accent-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Clock size={26} color="var(--accent-primary)" />
+              </div>
+            </div>
+            <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '8px' }}>Waiting for Host Approval</h2>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '14px', marginBottom: '16px', lineHeight: 1.5 }}>
+              You have requested to join <strong style={{ color: '#fff' }}>"{room?.title || roomId}"</strong>.
+            </p>
+            <div style={{ padding: '12px 14px', borderRadius: '10px', background: 'rgba(255, 255, 255, 0.04)', border: '1px solid var(--border-color)', marginBottom: '24px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+              The room host <strong style={{ color: 'var(--accent-primary)' }}>{waitingApprovalInfo?.ownerName || room?.owner?.username || 'Owner'}</strong> has been notified to admit you.
+            </div>
+            <button
+              onClick={() => {
+                cancelJoinRequest(roomId);
+                navigate('/');
+              }}
+              className="btn btn-secondary"
+              style={{ width: '100%', padding: '10px 16px' }}
+            >
+              <ArrowLeft size={16} />
+              <span>Cancel Request & Back to Lobby</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Join Request Denied Screen */}
+      {approvalDeniedMessage && !isWaitingApproval && !roomLoading && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(10, 11, 16, 0.95)', backdropFilter: 'blur(20px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 130, padding: '24px' }}>
+          <div className="glass-card" style={{ maxWidth: '440px', width: '100%', padding: '36px 28px', textAlign: 'center', border: '1px solid rgba(239, 68, 68, 0.35)' }}>
+            <div style={{ width: '56px', height: '56px', borderRadius: '16px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+              <ShieldAlert size={28} color="#f87171" />
+            </div>
+            <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '8px' }}>Request Declined</h2>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '14px', marginBottom: '24px', lineHeight: 1.5 }}>
+              {approvalDeniedMessage}
+            </p>
+            <button onClick={() => navigate('/')} className="btn btn-primary" style={{ width: '100%', padding: '10px 16px' }}>
+              <ArrowLeft size={16} />
+              <span>Back to Canvas Lobby</span>
+            </button>
           </div>
         </div>
       )}

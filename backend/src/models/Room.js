@@ -48,6 +48,10 @@ const RoomSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    requireApproval: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,

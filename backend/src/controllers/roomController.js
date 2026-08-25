@@ -8,7 +8,7 @@ import bcrypt from 'bcryptjs';
 // Create a new drawing room
 export const createRoom = async (req, res) => {
   try {
-    const { title, description, isPrivate, password, defaultRole, maxUsers } = req.body;
+    const { title, description, isPrivate, password, defaultRole, maxUsers, requireApproval } = req.body;
     const userId = req.user.id;
 
     const trimmedTitle = title?.trim();
@@ -51,6 +51,7 @@ export const createRoom = async (req, res) => {
       passwordHash,
       defaultRole: defaultRole === 'viewer' ? 'viewer' : 'editor',
       maxUsers: maxUsers || 20,
+      requireApproval: !!requireApproval,
     });
 
     // Create owner as room member
@@ -78,6 +79,7 @@ export const createRoom = async (req, res) => {
         description: newRoom.description,
         isPrivate: newRoom.isPrivate,
         isGuestRoom: newRoom.isGuestRoom,
+        requireApproval: newRoom.requireApproval,
         defaultRole: newRoom.defaultRole,
         owner: userId,
         createdAt: newRoom.createdAt,
@@ -195,6 +197,7 @@ export const getRoomDetails = async (req, res) => {
         description: room.description,
         isPrivate: room.isPrivate,
         hasPassword: !!room.passwordHash,
+        requireApproval: !!room.requireApproval,
         defaultRole: room.defaultRole,
         maxUsers: room.maxUsers,
         owner: room.owner,
@@ -228,7 +231,7 @@ export const joinRoom = async (req, res) => {
         // Private room without password (invite only)
       } else {
         if (!password) {
-          return res.status(401).json({ success: false, message: 'Password is required to join this private room.' });
+          return res.status(401).json({ success: false, message: 'Password is required for this room.' });
         }
         const isMatch = await bcrypt.compare(password, room.passwordHash);
         if (!isMatch) {
@@ -237,19 +240,29 @@ export const joinRoom = async (req, res) => {
       }
     }
 
-    // Check membership or create
-    let member = await RoomMember.findOne({ roomId, userId });
-    if (!member) {
-      const role = room.owner.toString() === userId.toString() ? 'owner' : room.defaultRole;
-      member = await RoomMember.create({
-        roomId,
-        userId,
-        role,
+    // Check if room is full
+    const currentMemberCount = await RoomMember.countDocuments({ roomId });
+    const isAlreadyMember = await RoomMember.findOne({ roomId, userId });
+
+    if (!isAlreadyMember && currentMemberCount >= room.maxUsers) {
+      return res.status(403).json({
+        success: false,
+        message: `This room has reached its maximum limit of ${room.maxUsers} collaborators.`,
       });
-    } else {
-      member.lastActiveAt = new Date();
-      await member.save();
     }
+
+    // Add or update membership
+    const member = await RoomMember.findOneAndUpdate(
+      { roomId, userId },
+      {
+        $setOnInsert: {
+          role: room.owner.toString() === userId.toString() ? 'owner' : room.defaultRole,
+          joinedAt: new Date(),
+        },
+        $set: { lastActiveAt: new Date() },
+      },
+      { upsert: true, new: true }
+    );
 
     res.json({
       success: true,
@@ -258,7 +271,8 @@ export const joinRoom = async (req, res) => {
       room: {
         roomId: room.roomId,
         title: room.title,
-        owner: room.owner,
+        isPrivate: room.isPrivate,
+        requireApproval: !!room.requireApproval,
       },
     });
   } catch (err) {
@@ -267,11 +281,11 @@ export const joinRoom = async (req, res) => {
   }
 };
 
-// Update room settings (owner only)
+// Update room details (owner only)
 export const updateRoom = async (req, res) => {
   try {
     const { roomId } = req.params;
-    const { title, description, isPrivate, password, defaultRole, maxUsers } = req.body;
+    const { title, description, isPrivate, password, defaultRole, maxUsers, requireApproval } = req.body;
     const userId = req.user.id;
 
     const room = await Room.findOne({ roomId });
@@ -280,7 +294,7 @@ export const updateRoom = async (req, res) => {
     }
 
     if (room.owner.toString() !== userId.toString()) {
-      return res.status(403).json({ success: false, message: 'Only the room owner can modify room settings.' });
+      return res.status(403).json({ success: false, message: 'Only the room owner can update settings.' });
     }
 
     if (title && title.trim()) {
@@ -301,6 +315,7 @@ export const updateRoom = async (req, res) => {
     if (description !== undefined) room.description = description.trim();
     if (defaultRole) room.defaultRole = defaultRole;
     if (maxUsers) room.maxUsers = maxUsers;
+    if (typeof requireApproval === 'boolean') room.requireApproval = requireApproval;
 
     if (typeof isPrivate === 'boolean') {
       room.isPrivate = isPrivate;
