@@ -912,9 +912,9 @@ export const CanvasPage = () => {
         opacity: 1,
       };
 
-      pushUndoState();
+      pushUndo(elements);
       setElements((prev) => [...prev, newImageElement]);
-      broadcastElementCreated(newImageElement);
+      sendElementCreate(newImageElement);
       setSelectedIds([newImageElement.id]);
     };
     img.src = dataUrl;
@@ -950,7 +950,7 @@ export const CanvasPage = () => {
 
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
-  }, [currentRole, screenToWorld, pushUndoState, broadcastElementCreated]);
+  }, [currentRole, screenToWorld, elements, pushUndo, sendElementCreate]);
 
   // Drag and drop support for PNG / JPEG images
   const handleDragOver = (e) => {
